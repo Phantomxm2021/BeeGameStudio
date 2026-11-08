@@ -1,0 +1,265 @@
+{
+  "id": "8667fed0-b511-4a88-af81-897dbcec520f",
+  "label": "platformer-1280x800",
+  "conditions": {
+    "source": "agent-declared",
+    "text": "Playable local prototype; ordinary mouse/keyboard; no state injection; headless desktop, not a player study"
+  },
+  "preview": {
+    "mode": "development",
+    "fixture": "platformer",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "reducedMotion": false
+  },
+  "observedEnvironment": {
+    "status": "observed",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "devicePixelRatio": 1,
+    "maxTouchPoints": 0,
+    "coarsePointer": false,
+    "hover": true
+  },
+  "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+  "startedAt": "2026-10-31T09:51:45.758Z",
+  "endedAt": "2026-10-31T09:51:51.095Z",
+  "durationMs": 5337,
+  "status": "finished",
+  "endReason": "scenario-finished",
+  "observationStatus": "finished",
+  "gameplayVerdict": "not-evaluated",
+  "droppedEvents": 0,
+  "truncatedEvents": 0,
+  "counts": {
+    "observer.started": 1,
+    "navigation": 1,
+    "console.log": 22
+  },
+  "events": [
+    {
+      "at": "2026-10-31T09:51:45.760Z",
+      "type": "observer.started",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": {
+        "url": "http://127.0.0.1:57905/platformer-before.html",
+        "earlierConsoleHistoryExcluded": true
+      }
+    },
+    {
+      "at": "2026-10-31T09:51:45.761Z",
+      "type": "navigation",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": {
+        "url": "http://127.0.0.1:57905/platformer.html"
+      }
+    },
+    {
+      "at": "2026-10-31T09:51:45.765Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Ready\",\"reduced\":false,\"focus\":\"Begin\"},\"state\":\"Ready\",\"at\":4.400000095367432}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.158Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"start\",\"state\":\"Playing\",\"at\":397.09999990463257}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.166Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":404.80000019073486}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.281Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"pause\",\"state\":\"Paused\",\"at\":520.2000002861023}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.281Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Paused\",\"reduced\":false,\"focus\":\"Resume\"},\"state\":\"Paused\",\"at\":520.5999999046326}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.988Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"resume\",\"state\":\"Playing\",\"at\":1227.5999999046326}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.988Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":1227.8000001907349}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.989Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"pause\",\"state\":\"Paused\",\"at\":1228.5999999046326}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.989Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Paused\",\"reduced\":false,\"focus\":\"Resume\"},\"state\":\"Paused\",\"at\":1228.9000000953674}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.990Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"key-up\",\"value\":\"Escape\",\"state\":\"Paused\",\"at\":1229.4000000953674}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.990Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"resume\",\"state\":\"Playing\",\"at\":1229.8000001907349}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.990Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":1229.9000000953674}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:46.991Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"key-up\",\"value\":\"Escape\",\"state\":\"Playing\",\"at\":1230.2000002861023}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:47.419Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"key-down\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":1658.7000002861023}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:48.222Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"key-down\",\"value\":\"Space\",\"state\":\"Playing\",\"at\":2461.5}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:48.234Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"jump\",\"state\":\"Playing\",\"at\":2471.0999999046326}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:48.305Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"key-up\",\"value\":\"Space\",\"state\":\"Playing\",\"at\":2544.300000190735}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:50.081Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"goal\",\"state\":\"Won\",\"at\":4320.5}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:50.082Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Won\",\"reduced\":false,\"focus\":\"Try again\"},\"state\":\"Won\",\"at\":4321}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:50.102Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"key-up\",\"value\":\"ArrowRight\",\"state\":\"Won\",\"at\":4340.900000095367}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:50.508Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"restart\",\"state\":\"Playing\",\"at\":4747.900000095367}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:51:50.515Z",
+      "type": "console.log",
+      "targetId": "8F5129E70BDAEAC96130D134E2C05EAD",
+      "detail": [
+        "game-event",
+        "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":4754.5}"
+      ]
+    }
+  ],
+  "files": {
+    "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/ui-motion/2026-10-31T09-51-43.105Z/8667fed0-b511-4a88-af81-897dbcec520f.json",
+    "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/ui-motion/2026-10-31T09-51-43.105Z/8667fed0-b511-4a88-af81-897dbcec520f.png"
+  },
+  "screenshotAvailable": true
+}

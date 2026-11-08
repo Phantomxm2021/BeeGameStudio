@@ -144,9 +144,9 @@ export function createSupabaseResourceRepository(
     if (!storageObjectUrl) throw new Error('Resource Pack cover object is unavailable')
     return storageObjectUrl
   }
-  const toPack = async (row: PackRow, elementCount = row.element_count ?? 0,
+  const toPack = async (row: PackRow, elementCount = row.element_count ?? 0, includeCover = true,
   ): Promise<PackSummary> => {
-    const coverPath = await resolveCoverPath(row)
+    const coverPath = includeCover ? await resolveCoverPath(row) : undefined
     return {
     id: row.id,
     name: row.name,
@@ -199,14 +199,14 @@ export function createSupabaseResourceRepository(
   })
   const resolveRows = async (_packId: string, rows: ElementRow[]): Promise<ResourceElement[]> => rows.map(row => resolveEffectiveResourceMetadata(toElement(row)))
   return {
-    async listPacks() {
+    async listPacks(readOptions) {
       const [packRows, elementRows] = await Promise.all([
         request<PackRow>('beegame_resource_packs', { order: 'name.asc' }),
         request<Pick<ElementRow, 'pack_id'>>('beegame_resource_elements', { select: 'pack_id' }),
       ])
       const counts = new Map<string, number>()
       for (const element of elementRows) counts.set(element.pack_id, (counts.get(element.pack_id) ?? 0) + 1)
-      return await Promise.all(packRows.map(row => toPack(row, counts.get(row.id) ?? 0)))
+      return await Promise.all(packRows.map(row => toPack(row, counts.get(row.id) ?? 0, readOptions?.includeCover !== false)))
     },
     async listCatalogPacks() {
       const rows = await request<CatalogPackRow>('beegame_resource_pack_catalog', { order: 'pack_name.asc,pack_id.asc' })

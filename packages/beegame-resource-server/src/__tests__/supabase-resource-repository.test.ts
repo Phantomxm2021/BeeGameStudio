@@ -195,3 +195,22 @@ describe('Supabase resource repository', () => {
     await expect(repository.deletePack('missing')).resolves.toBe(false)
   })
 })
+
+
+test('metadata-only catalog reads never resolve Pack covers and keep default cover reads strict',async()=>{
+  let covers=0
+  const repository=createRepository({baseUrl:'https://supabase.test',serviceRoleKey:'synthetic',
+    getStorageObjectUrl:async()=>{covers++;throw Error('Offline cover storage unavailable')},
+    fetchImpl:async request=>{
+      const url=request instanceof Request?request.url:String(request)
+      if(url.includes('beegame_resource_elements'))return Response.json([{pack_id:'pack-1'}])
+      return Response.json([{id:'pack-1',name:'Catalog pack',styles:['Stylized'],game_types:[],dimension:'2D',
+        primary_category:'2d-art',categories:['environment'],license:'internal',version:'1',status:'published',
+        cover_path:'cover.png',cover_storage_object_id:'cover-1'}])
+    }})
+  const packs=await repository.listPacks({includeCover:false})
+  expect(packs).toMatchObject([{id:'pack-1',elementCount:1,status:'published',license:'internal'}])
+  expect(packs[0]).not.toHaveProperty('coverPath');expect(covers).toBe(0)
+  await expect(repository.listPacks()).rejects.toThrow('Offline cover storage unavailable')
+  expect(covers).toBe(1)
+})

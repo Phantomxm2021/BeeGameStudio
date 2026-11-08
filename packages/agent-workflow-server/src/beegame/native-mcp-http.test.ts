@@ -1,19 +1,74 @@
-import { expect, test } from 'bun:test'
+import { expect, test, spyOn } from 'bun:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { startNativeMcpHttp } from './native-mcp-http'
 import { prepareNativeMcpConfig, NATIVE_MCP_CONFIG_ENV } from './native-mcp-config'
 
-test('HTTP MCP rejects unapproved stored endpoints before starting a relay', async () => {
-  let checks = 0
-  await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([
-    { id: 'blocked', enabled: true, autoStart: true, scope: 'global', transport: 'http', url: 'http://127.0.0.1:9/mcp' },
-  ]) }, process.cwd(), undefined, undefined, { resolveOutboundTarget: async () => { checks++; return null } }))
-    .rejects.toThrow('MCP endpoint is not permitted')
-  expect(checks).toBe(1)
-  await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([
-    { id: 'ui-layout', enabled: true, autoStart: true, scope: 'global', transport: 'http', url: 'https://synthetic.invalid' },
-  ]) }, process.cwd(), {} as any)).rejects.toThrow('reserved')
+test('an unapproved HTTP MCP is reported without aborting native configuration', async () => {
+  const prepared = await prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([
+    { id: 'blocked', enabled: true, autoStart: true, scope: 'global', transport: 'http', url: 'https://127.0.0.1/mcp?secret=private' },
+  ]) }, process.cwd())
+  try {
+    expect(prepared.config.mcp_servers).toEqual({})
+    expect(prepared.context).toContain('bgs-blocked: address_not_public')
+    expect(prepared.context).not.toContain('private')
+  } finally { await prepared.close() }
+  const user=await prepareNativeMcpConfig({[NATIVE_MCP_CONFIG_ENV]:JSON.stringify([
+    {id:'ui-layout',enabled:true,autoStart:true,scope:'global',transport:'stdio',command:'/fixture/user-tool'},
+  ])},process.cwd())
+  try{expect(user.config.mcp_servers).toHaveProperty('bgs-ui-layout')}
+  finally{await user.close()}
+})
+
+test('DNS failures and security refusals isolate only their HTTP MCP across fresh preparation and recovery', async () => {
+  const servers = [
+    { id: 'dns', name: 'Search', transport: 'http', url: 'https://unresolved.invalid/mcp?token=private' },
+    { id: 'private', name: 'Internal', transport: 'http', url: 'https://10.0.0.1/mcp' },
+    { id: 'public', name: 'Public', transport: 'http', url: 'https://public.invalid/mcp', enabledTools: ['search'], disabledTools: ['write'] },
+    { id: 'browser', name: 'Browser', transport: 'stdio', command: '/fixture/browser' },
+  ].map(server => ({ ...server, enabled: true, autoStart: true, scope: 'beegame' }))
+  const raw = JSON.stringify(servers)
+  let lookups = 0
+  for (let round = 0; round < 2; round++) {
+    const prepared = await prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: raw }, process.cwd(), 'fixture', { outboundTargetPolicyOptions: { resolve4: hostname => {
+        lookups++
+        if (hostname === 'unresolved.invalid') throw Object.assign(Error('DNS fixture failure'), { code: 'ETIMEOUT' })
+        return ['93.184.216.34']
+      }, resolve6: () => [] } }, '/host/images.mjs')
+    const config = prepared.config.mcp_servers as Record<string, any>
+    try {
+      expect(Object.keys(config).sort()).toEqual(['beegame-images', 'bgs-browser', 'bgs-public'])
+      expect(config['bgs-public']).toMatchObject({ enabled_tools: ['search'], disabled_tools: ['write'] })
+      expect(config['bgs-public'].url).toMatch(/^http:\/\/127\.0\.0\.1:/)
+      expect(config['bgs-browser'].command).toBe('/fixture/browser')
+      expect(config['beegame-images'].args).toEqual(['/host/images.mjs', '--mcp'])
+      expect(prepared.context).toContain('bgs-dns: dns_unresolved')
+      expect(prepared.context).toContain('bgs-private: address_not_public')
+      expect(prepared.context).not.toContain('token=')
+      expect(JSON.stringify(servers)).toBe(raw)
+    } finally { await prepared.close(); await prepared.close() }
+    await expect(fetch(config['bgs-public'].url)).rejects.toThrow()
+    const { access } = await import('node:fs/promises')
+    await expect(access(config['bgs-browser'].env.PWTEST_SOCKETS_DIR)).rejects.toMatchObject({ code: 'ENOENT' })
+  }
+  expect(lookups).toBe(4)
+})
+
+test('invalid MCP configuration and relay failures remain errors instead of becoming unavailable tools', async () => {
+  await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: '{broken' }, process.cwd())).rejects.toThrow()
+  await expect(startNativeMcpHttp({ broken: { url: 'https://public.invalid', headers: [{ key: 'Host', value: 'bad' }] } }))
+    .rejects.toThrow('MCP header')
+  await expect(startNativeMcpHttp({ broken: 'https://public.invalid' }, { inspectOutboundTarget: async () => {
+    throw Error('Broken internal inspector')
+  } })).rejects.toThrow('Broken internal inspector')
+  const serve = spyOn(Bun, 'serve').mockImplementation(() => { throw Error('Relay listen failed') })
+  try {
+    await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([
+      { id: 'public', enabled: true, autoStart: true, scope: 'global', transport: 'http', url: 'https://public.invalid' },
+    ]) }, process.cwd(), undefined, { outboundTargetPolicyOptions: {
+      resolve4: () => ['93.184.216.34'], resolve6: () => [],
+    } })).rejects.toThrow('Relay listen failed')
+  } finally { serve.mockRestore() }
 })
 
 test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects and closes its listener', async () => {
@@ -39,14 +94,17 @@ test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects an
       ? { tools: [{ name: 'offline_probe', inputSchema: { type: 'object' } }] }
       : { content: [{ type: 'text', text: 'offline success' }] } })
   } })
-  const relay = await startNativeMcpHttp({ fixture: { url: `http://synthetic-mcp.invalid:${upstream.port}/mcp`, headers: [{ key: 'Authorization', value: 'Bearer fixture-secret' }, { key: 'X-API-Key', value: 'fixture-key' }] } }, {
+  const relay = await startNativeMcpHttp({ unavailable: 'https://unresolved.invalid/mcp', fixture: { url: `http://synthetic-mcp.invalid:${upstream.port}/mcp`, headers: [{ key: 'Authorization', value: 'Bearer fixture-secret' }, { key: 'X-API-Key', value: 'fixture-key' }] } }, {
     outboundTargetPolicyOptions: { allowedHosts: ['model.example'], allowHttp: true, allowTrustedDevelopmentProxy: true },
-    resolveOutboundTarget: async (value, policy) => {
+    inspectOutboundTarget: async (value, policy) => {
+      if (new URL(value).hostname === 'unresolved.invalid') return { approved: false, code: 'dns_unresolved' }
       expect(policy).toMatchObject({ allowedHosts: [], allowHttp: false, allowTrustedDevelopmentProxy: false })
-      return { url: new URL(value), addresses: ['127.0.0.1'],
-        lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
+      return { approved: true, target: { url: new URL(value), addresses: ['127.0.0.1'],
+        lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) } }
     },
   })
+  expect(relay.unavailable).toEqual(['unavailable: dns_unresolved'])
+  expect(relay.config).not.toHaveProperty('unavailable')
   expect(JSON.stringify(relay.config)).not.toContain('fixture-secret')
   expect(JSON.stringify(relay.config)).not.toContain('fixture-key')
   const config = relay.config.fixture!, client = new Client({ name: 'offline-client', version: '1' })
@@ -81,8 +139,8 @@ test('HTTP MCP live streams deliver before EOF and cancellation drains the upstr
     }, cancel() { cancelled() } }), { headers: { 'content-type': 'text/event-stream' } })
   } })
   const relay = await startNativeMcpHttp({ fixture: upstream.url.toString() }, {
-    resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
-      lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }),
+    inspectOutboundTarget: async value => ({ approved: true, target: { url: new URL(value), addresses: ['127.0.0.1'],
+      lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) } }),
   })
   try {
     const response = await fetch(relay.config.fixture!.url, { headers: relay.config.fixture!.http_headers, signal: AbortSignal.timeout(2000) })

@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { resolve } from 'node:path'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, realpath, rm, writeFile, readFile } from 'node:fs/promises'
@@ -11,13 +12,18 @@ import { agentProfessionalContextForRun } from '../beegame/workflow-v3/agent-goa
 import { getLatestRuntimeUsage, type BeeGameEvent } from '../beegame/session-manager'
 
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
-localTest.each([false, true])('native children retain scope/capacity and reused work blocks premature completion: %s', async premature => {
-  const root = await mkdtemp('/private/tmp/bgs-short-context-'), game = join(root, 'game'), catalog = join(root, 'skills')
+localTest.each([false, true])('native children use explicit scope and user capacity; reused work blocks premature completion: %s', async premature => {
+  const root = await mkdtemp('/private/tmp/bgs-short-context-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(join(game, 'assets'), { recursive: true })
   await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
   await writeFile(join(game, 'shared.txt'), 'PARENT_OWNED_UNCHANGED')
   const confirmedScope = 'CONFIRMED_SCOPE_SENTINEL: Preserve selected visuals, animation and gameplay; no external charges.'
+  // Capacity is explicit native user configuration, not a BGS override.
+  const home=join(root,'private','bgs')
+  await mkdir(home,{recursive:true})
+  await writeFile(join(home,'config.toml'),'[agents]\nmax_concurrent_threads_per_session = 2\n')
   const image = join(game, 'assets/fixture.png')
   await sharp({ create: { width: 16, height: 16, channels: 4, background: '#336699' } }).png().toFile(image)
   let quotes = 0, parentCalls = 0, limitRejected = false, peakChildren = 0, liveChildren = 0
@@ -34,7 +40,7 @@ localTest.each([false, true])('native children retain scope/capacity and reused 
     quotes++; return Response.json({ available: true, provider: 'offline-fixture' })
   } })
   const tools = await openAgentTools({ workspacePath: game, sessionId: 'fixture', getAuthToken: () => undefined,
-    openImage: () => ({ endpoint: bridge.url.origin, instruction: 'Offline fixture', close: async () => {} }) })
+    openImage: () => ({ fetch: (request: Request) => fetch(new Request(bridge.url.origin, request)), instruction: 'Offline fixture', close: async () => {} }) })
   const entry = resolve(game,tools.directory, 'assets.mjs')
   const message = (text: string) => ({ id: 'answer', type: 'message', role: 'assistant', status: 'completed',
     content: [{ type: 'output_text', text, annotations: [] }] })
@@ -56,7 +62,7 @@ localTest.each([false, true])('native children retain scope/capacity and reused 
       parentCalls++
       if (parentCalls === 1) output = [call('exec_command', { cmd: "printf 'Parent history saved.'" })]
       else if (parentCalls === 2) output = ['a', 'b'].map(owner => call('spawn_agent', { fork_context: false,
-        message: `CHILD_ASSIGNMENT_${owner}: Current assignment is a synthetic bounded module task. Only write part-${owner}.txt with ${owner}; shared.txt belongs to the parent. Read ${image} and quote via bun ${entry} cost. Do not delegate, advance or deliver; return output paths and unverified limits.` }, 'spawn_' + owner))
+        message: `CHILD_ASSIGNMENT_${owner}: ${confirmedScope} Current assignment is a synthetic bounded module task. Only write part-${owner}.txt with ${owner}; shared.txt belongs to the parent. Read ${image} and quote via bun ${entry} cost. Do not delegate, advance or deliver; return output paths and unverified limits.` }, 'spawn_' + owner))
       else if (parentCalls === 3) {
         await twoChildrenStarted
         output = [call('spawn_agent', { fork_context: false, message: 'THIRD_CHILD_MUST_NOT_START' }, 'capacity_probe')]
@@ -125,10 +131,12 @@ localTest.each([false, true])('native children retain scope/capacity and reused 
   try {
     runtime = await runner.start({ sessionId: 'fixture', cwd: game,
       systemContext: agentProfessionalContextForRun({}), confirmedBriefContext: confirmedScope,
-      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
         OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'gpt-5.4' },
-      onNativeUsage: (value, epoch) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
-        payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value } }),
+      onNativeUsage: (value, epoch, accounting) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
+        payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value,
+          ...(accounting?.baselineOnly ? {usageBaselineOnly:true} : {}),
+          ...(accounting?.replayed ? {usageReplayed:true} : {}) } }),
       requestPermission: async () => ({ behavior: 'deny' }),
     })
     const submitted = runtime.submit({ confirmedBriefContext: confirmedScope, prompt: 'PARENT_HISTORY_SENTINEL: Establish parent history, then delegate two independent fixture modules and integrate their actual files. Parent owns shared.txt. No game delivery.', signal: AbortSignal.timeout(20000), onMessage: event => { events.push(event) },
@@ -147,7 +155,7 @@ localTest.each([false, true])('native children retain scope/capacity and reused 
       expect(inputs).toHaveLength(owner === 'a' ? 3 : 2)
       expect(JSON.stringify(inputs[0].input)).not.toContain('Parent history saved.')
       expect(JSON.stringify(inputs[0].input)).toContain('CONFIRMED_SCOPE_SENTINEL')
-      expect(JSON.stringify(inputs[0].input)).toContain('BGS limited parallel work:')
+      expect(JSON.stringify(inputs[0].input)).not.toContain('BGS limited parallel work:')
       expect(JSON.stringify(inputs[0].input)).toContain('Only write part-' + owner + '.txt')
       expect(JSON.stringify(inputs[1].input)).toContain('offline-fixture')
       expect(JSON.stringify(inputs[1].input)).toContain('data:image/')

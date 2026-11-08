@@ -23,10 +23,10 @@ export function evaluateResourceElementSelectionReadiness(
   _pack: ResourcePack,
   root: ResourceElement,
   elements: readonly ResourceElement[],
+  byId: ReadonlyMap<string, ResourceElement> = new Map(elements.map(element => [element.id, element])),
 ): ResourceElementSelectionReadiness {
   const blocking: ResourcePublishIssue[] = []
   const warnings: ResourcePublishIssue[] = []
-  const byId = new Map(elements.map(element => [element.id, element]))
   const dependencyIds = new Set<string>()
   const visited = new Set<string>()
   const visit = (element: ResourceElement): void => {

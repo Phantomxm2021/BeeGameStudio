@@ -1,8 +1,8 @@
 import { test, expect } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createRun, type Run } from './state'
-import { assertCommit, createLocalWorkflowStore, createRemoteWorkflowStore, previewRunState } from './store'
+import { assertCommit, createLocalWorkflowStore, createRemoteWorkflowStore, previewRunState, runtimeRunState } from './store'
 
 function run(root = '/tmp/synthetic-game'): Run {
   return createRun({ projectId: 'synthetic', ownerId: 'alice', workspacePath: root, chatSessionId: 'chat',
@@ -161,4 +161,82 @@ test('visual source records require the active writer and cannot rewrite already
   const late=structuredClone(stopped);late.version++
   late.agentTurns![0]!.visualSelection!.sources.push({path:'late.png',sha256:'c'.repeat(64)})
   expect(() => assertCommit('synthetic','alice',stopped.version,late,stopped,'agent.visual-sources-selected')).toThrow('active writer')
+})
+
+
+test('remote runtime state shares only a current-version projection and always checks live ownership', async () => {
+  let current = run(), headerFailure = false, denied = false, absent = false, rpcFailure = false, rpcAbsent = false
+  current.agentTurns = [{attemptId:'saved',requestKey:'saved',sessionId:'saved',workerId:'worker',fence:1,
+    status:'ended',startedAt:'2026-11-07T00:00:00Z',finishedAt:'2026-11-07T00:01:00Z',
+    error:'private historical detail',usage:{heavy:'private usage'},projectInputs:{error:'private source detail'}}]
+  let headers = 0, full = 0
+  const store = createRemoteWorkflowStore({url:'https://db.invalid',serviceKey:'host-only',fetchImpl:async input => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith('/beegame_projects')) {
+      headers++
+      expect(url.searchParams.get('owner_id')).toBe('eq.alice')
+      expect(url.searchParams.get('select')).not.toContain('agentTurns')
+      return headerFailure ? Response.json({}, {status:503}) : Response.json(denied ? [] : [{workflow:absent ? null : previewRunState(current)}])
+    }
+    full++
+    expect(url.pathname).toBe('/rest/v1/rpc/beegame_workflow_v3_read')
+    return rpcFailure ? Response.json({}, {status:503}) : Response.json(rpcAbsent ? null : current)
+  }})
+  const values = await Promise.all(Array.from({length:5}, () => store.readRuntimeState!('synthetic','alice')))
+  expect(full).toBe(1); expect(headers).toBe(5)
+  expect(values[0]).toEqual(runtimeRunState(current))
+  expect(values[0]).not.toHaveProperty('requirements')
+  expect(JSON.stringify(values[0])).not.toContain('private')
+  expect(values[0]?.agentTurns?.[0]).toMatchObject({attemptId:'saved',status:'ended',finishedAt:'2026-11-07T00:01:00Z'})
+  values[0]!.workspacePath = 'caller mutation'
+  expect((await store.readRuntimeState!('synthetic','alice'))?.workspacePath).toBe(current.workspacePath)
+  expect(full).toBe(1)
+  current = {...current,version:current.version+1,paused:{at:'2026-11-07T00:00:00Z'}}
+  expect((await store.readRuntimeState!('synthetic','alice'))?.paused).toEqual(current.paused)
+  expect(full).toBe(2)
+  current.version++;rpcFailure=true
+  await expect(store.readRuntimeState!('synthetic','alice')).rejects.toThrow('database operation failed')
+  rpcFailure=false
+  expect((await store.readRuntimeState!('synthetic','alice'))?.version).toBe(current.version)
+  expect(full).toBe(4)
+  headerFailure=true
+  await expect(store.readRuntimeState!('synthetic','alice')).rejects.toThrow('state could not be read')
+  headerFailure=false;denied=true
+  await expect(store.readRuntimeState!('synthetic','alice')).rejects.toThrow('Project access denied')
+  denied=false;absent=true
+  expect(await store.readRuntimeState!('synthetic','alice')).toBeUndefined()
+  absent=false
+  expect(await store.readRuntimeState!('synthetic','alice')).toEqual(runtimeRunState(current))
+  expect(full).toBe(5)
+  current.version++;rpcAbsent=true
+  expect(await store.readRuntimeState!('synthetic','alice')).toBeUndefined()
+  rpcAbsent=false
+  expect(await store.readRuntimeState!('synthetic','alice')).toEqual(runtimeRunState(current))
+  expect(full).toBe(7)
+})
+
+test('local runtime projection tracks replaced state files and never reuses another owner or corrupt history', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-runtime-projection-')
+  try {
+    const store = createLocalWorkflowStore(root), current = run()
+    await store.commit('synthetic','alice',0,current,'created')
+    const snapshot = await store.readRuntimeState!('synthetic','alice')
+    expect(snapshot).toEqual(runtimeRunState(current))
+    snapshot!.workspacePath='caller mutation'
+    expect((await store.readRuntimeState!('synthetic','alice'))?.workspacePath).toBe(current.workspacePath)
+    await expect(store.readRuntimeState!('synthetic','other')).rejects.toThrow('another project owner')
+    const next={...current,version:current.version+1,paused:{at:'2026-11-07T00:00:00Z'}}
+    await store.commit('synthetic','alice',current.version,next,'paused')
+    expect(await store.readRuntimeState!('synthetic','alice')).toEqual(runtimeRunState(next))
+    const {digest} = await import('./state')
+    const file=join(root,'workflow-v3',digest('synthetic')+'.json')
+    // Same revision, different file identity: no version-only reuse.
+    const changed={...next,ownerId:'bobby'}
+    await writeFile(file+'.next',JSON.stringify({run:changed,events:[]}));await rename(file+'.next',file)
+    await expect(store.readRuntimeState!('synthetic','alice')).rejects.toThrow('another project owner')
+    await writeFile(file,'{broken')
+    await expect(store.readRuntimeState!('synthetic','alice')).rejects.toThrow()
+    await rm(file)
+    expect(await store.readRuntimeState!('synthetic','alice')).toBeUndefined()
+  } finally { await rm(root,{recursive:true,force:true}) }
 })

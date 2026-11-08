@@ -47,7 +47,7 @@
 
 [issue #49](https://github.com/scenario-labs/skills/issues/49) 与 [#255](https://github.com/scenario-labs/skills/issues/255) 分别提供 sibling 依赖和安装路径方面的社区报告，不据此断定当前版本仍失败。它的单个流程还会展开其他技能/引用，并增加外部等待与潜在费用。
 
-BGS 已有 `assets.mjs`、`media.mjs`、Manifest、图集检查及 [精灵动画方法](../.beegame/skills/bgs-game-skills/game-technical-artist/references/ai-sprite-animation.md)。无需另接 Scenario。可参考像素检查与资源/运行时证据的区分，不能把上游测试通过解释为 BGS 动画或视觉质量通过。
+BGS 已有 `assets.mjs`、`media.mjs`、Manifest、图集检查及 [精灵动画方法](../.beegame/plugins/bgs-game-development/game-technical-artist/references/ai-sprite-animation.md)。无需另接 Scenario。可参考像素检查与资源/运行时证据的区分，不能把上游测试通过解释为 BGS 动画或视觉质量通过。
 
 ### Awesome Gamedev Agent Skills
 
@@ -61,7 +61,7 @@ BGS 已有 `assets.mjs`、`media.mjs`、Manifest、图集检查及 [精灵动画
 
 固定版本：[513da1cc129bd1af1dfbbf2cc651d6e09bf893fd](https://github.com/ronniebasak/game-feel-skill/tree/513da1cc129bd1af1dfbbf2cc651d6e09bf893fd)，2026-08-22。[MIT](https://github.com/ronniebasak/game-feel-skill/blob/513da1cc129bd1af1dfbbf2cc651d6e09bf893fd/LICENSE)。审阅时仅有一条提交，未取得有意义的独立复现或社区效果反馈。
 
-[`game-feel`](https://github.com/ronniebasak/game-feel-skill/blob/513da1cc129bd1af1dfbbf2cc651d6e09bf893fd/skills/game-feel/SKILL.md) 的输入、响应、空间情境、表现等因果区分有用，但没有执行脚本或测试。其统一时间/FPS 阈值是作者启发式，不是 BGS 的验收规则。[BGS control-response](../.beegame/skills/bgs-game-skills/game-feel-designer/references/control-response.md) 已引用并做了适用性限制；没有重复安装的增量。
+[`game-feel`](https://github.com/ronniebasak/game-feel-skill/blob/513da1cc129bd1af1dfbbf2cc651d6e09bf893fd/skills/game-feel/SKILL.md) 的输入、响应、空间情境、表现等因果区分有用，但没有执行脚本或测试。其统一时间/FPS 阈值是作者启发式，不是 BGS 的验收规则。[BGS control-response](../.beegame/plugins/bgs-game-development/game-feel-designer/references/control-response.md) 已引用并做了适用性限制；没有重复安装的增量。
 
 ### Yuki Game Dev Skills
 

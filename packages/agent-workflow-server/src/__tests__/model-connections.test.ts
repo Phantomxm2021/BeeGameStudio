@@ -512,3 +512,53 @@ test('same-origin BYOK edits preserve legacy provider fields but cannot repair a
     { baseUrl: 'https://personal.example/another/v1', model: 'fixture-model' })).toThrow('API key')
   expect(readFileSync(path, 'utf8')).toBe(unchanged)
 })
+
+
+test('account native TOML selects one BYOK connection for local and remote runtime paths', async () => {
+  const config = model(), home = join(root, '.runtime/app/bgs')
+  mkdirSync(home, { recursive: true })
+  const file = join(home, 'config.toml'), previous = process.env.BGS_CONFIG_FIXTURE_KEY
+  process.env.BGS_CONFIG_FIXTURE_KEY = 'native-personal-fixture'
+  try {
+    writeFileSync(file, `model = "native-selected"
+model_provider = "fixture"
+[model_providers.fixture]
+base_url = "https://native.example/v1"
+env_key = "BGS_CONFIG_FIXTURE_KEY"
+wire_api = "responses"
+`)
+    const expected = { BEEGAME_MODEL: 'native-selected', OPENAI_BASE_URL: 'https://native.example/v1',
+      OPENAI_API_KEY: 'native-personal-fixture', BEEGAME_MODEL_TYPE: 'openai', BEEGAME_API_PROTOCOL: 'responses',
+      [BEEGAME_MODEL_BILLING_SOURCE]: 'byok', OPENAI_AUTH_MODE: '', ANTHROPIC_API_KEY: '' }
+    expect(resolveModelConnection(root, config, { OPENAI_API_KEY: 'stale-platform', OPENAI_AUTH_MODE: 'chatgpt' })).toMatchObject(expected)
+    const repository = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false })
+    expect(await repository.getRuntimeEnv(root, 'owner', undefined, config.id)).toMatchObject(expected)
+    expect(resolveModelConnection(join(root, 'other-owner'), config, { OPENAI_API_KEY: 'platform' }).OPENAI_API_KEY).toBe('platform')
+    process.env.BGS_CONFIG_FIXTURE_KEY = 'changed-personal-fixture'
+    expect(resolveModelConnection(root, config, {}).OPENAI_API_KEY).toBe('changed-personal-fixture')
+    delete process.env.BGS_CONFIG_FIXTURE_KEY
+    expect(() => resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform-fallback' })).toThrow('environment variable is not set')
+    expect(() => resolveModelConnection(root, config, {})).not.toThrow('BGS_CONFIG_FIXTURE_KEY')
+    writeFileSync(file, `model_provider = "fixture"
+[model_providers.fixture]
+base_url = "https://native.example/v1"
+env_key = "BGS_CONFIG_FIXTURE_KEY"
+`)
+    expect(() => resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform-fallback' })).toThrow('top-level model')
+    writeFileSync(file, `model = "native"
+model_provider = "missing"
+[model_providers.fixture]
+base_url = "https://native.example/v1"
+env_key = "BGS_CONFIG_FIXTURE_KEY"
+`)
+    expect(() => resolveModelConnection(root, config, {})).toThrow('selected provider')
+    writeFileSync(file, `[model_providers.fixture]
+base_url = "https://native.example/v1"
+env_key = "BGS_CONFIG_FIXTURE_KEY"
+`)
+    expect(resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform' }).OPENAI_API_KEY).toBe('platform')
+  } finally {
+    if (previous === undefined) delete process.env.BGS_CONFIG_FIXTURE_KEY
+    else process.env.BGS_CONFIG_FIXTURE_KEY = previous
+  }
+})

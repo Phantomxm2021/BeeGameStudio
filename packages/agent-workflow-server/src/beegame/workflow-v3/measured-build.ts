@@ -1,10 +1,7 @@
-import { readFile, realpath } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { checkIsCurrent, versionsMatch } from './checks'
-import { STATIC_ARTIFACT_CHECK_VERSION, staticArtifactFiles } from './runtime-checks'
-import { createZipArchive } from '../session-manager'
-import { digest, WorkflowError, type Run, type CheckResult, type FileVersion, type AgentMeasurement } from './state'
-import { projectFiles, projectDependencies, sameFiles, changedProjectPaths } from './editable-project'
+import { STATIC_ARTIFACT_CHECK_VERSION } from './runtime-checks'
+import { WorkflowError, type Run, type CheckResult, type FileVersion, type AgentMeasurement } from './state'
+import { projectFiles, projectDependencies, changedProjectPaths } from './editable-project'
 import { EDITABLE_BUILD_CHECK_VERSION, CHECK_VERSIONS } from './check-versions'
 import { artifactDigest } from '../runtime-acceptance'
 import { designInputRevision } from '../design-handoff'
@@ -17,7 +14,8 @@ export function blockingRegisteredContentChecks(measurement: AgentMeasurement) {
 }
 
 export async function selectAgentMeasuredBuild(run: Run, measurementId: string, busy = false,
-  purpose: 'delivery' | 'preview' | 'publication' = 'delivery', confirmedMessages?: string[]) {
+  purpose: 'delivery' | 'preview' | 'publication' = 'delivery', confirmedMessages?: string[],
+  readInputs?: ReturnType<typeof createMeasurementInputReader>) {
   if(run.writer || busy)throw new WorkflowError('workspace-busy','Wait for the native writer and owned tools to stop')
   const turn=run.agentTurns?.find(t=>t.measurements?.some(m=>m.id===measurementId))
   const measurement=turn?.measurements?.find(m=>m.id===measurementId)
@@ -43,7 +41,7 @@ export async function selectAgentMeasuredBuild(run: Run, measurementId: string, 
       ? 'Select a completed native turn with actual source-build and runtime-smoke evidence, not an author PASS or incomplete/failed turn'
       : 'Select a settled native turn with completed source-build and runtime-smoke evidence; an active writer, author PASS or failed measurement is insufficient')
   const freshness=await inspectAgentMeasurementInputs(run,measurement,
-    purpose === 'publication' ? confirmedMessages : undefined, purpose)
+    purpose === 'publication' ? confirmedMessages : undefined, purpose, readInputs)
   if(!freshness.current)
     throw new WorkflowError(freshness.code,freshness.reason)
   if (purpose !== 'preview') {
@@ -87,8 +85,40 @@ export function discussionMessagesSinceMeasurement(run: Run, measurement: AgentM
 /** Read current inputs without building, settling the writer or certifying
  * quality. Also usable BEFORE native exit so handoff does not require another
  * model turn. Preview/export still require an ended, quiesced native writer. */
+/** Share only one HTTP operation's disk observations, never a later request. */
+export function createMeasurementInputReader(run: Run, measurement: AgentMeasurement) {
+  const consumption=measurement.consumption?.checks??[]
+  const read=async(build:CheckResult,smoke:CheckResult,proof:NonNullable<CheckResult['projectBuild']>,artifact:FileVersion)=>{
+    const changedReports=[]
+    for(const report of measurement.reports)
+      if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
+    const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
+    const designInputsChanged=measurement.designInputRevision !== undefined &&
+      measurement.designInputRevision !== designInputRevision(run.workspacePath)
+    const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
+    // Export identity and observed runtime evidence are different facts. A
+    // source-only edit must not be described as changed runtime bytes. These
+    // comparisons do not accept a new build or rerun/reuse any test.
+    const contentChecks=measurement.checks.filter(check =>
+      ['content-structure','content-layout','content-resources'].includes(check.id))
+    const checkInputs=await Promise.all([build,smoke,...contentChecks,
+      ...consumption.flatMap(id=>measurement.checks.filter(c=>c.id===id))].map(async check=>({
+      // Source/dependency drift has its own comparison above. It does not
+      // change the saved check's inputs or checker version, so do not report
+      // the same edit as an additional, unrelated build-check failure.
+      id:check.id,savedStatus:check.status,inputsMatch:await checkIsCurrent(run.workspacePath,check,
+        check.id==='build'?{editableProject:true}:undefined),
+    })))
+    const artifactMatches=await artifactDigest(run.workspacePath,artifact.path,true).then(hash=>hash===artifact.sha256,()=>false)
+    return {changedReports,changedSources,designInputsChanged,dependenciesChanged,checkInputs,artifactMatches}
+  }
+  let pending:ReturnType<typeof read>|undefined
+  return (...args:Parameters<typeof read>)=>pending??=read(...args)
+}
+
 export async function inspectAgentMeasurementInputs(run: Run, measurement: AgentMeasurement, confirmedMessages?: string[],
-  purpose: 'delivery' | 'preview' | 'publication' = 'delivery') {
+  purpose: 'delivery' | 'preview' | 'publication' = 'delivery',
+  readInputs=createMeasurementInputReader(run,measurement)) {
   const fail=(code:string,reason:string)=>({current:false,code,reason})
   const latest=run.agentTurns?.flatMap(t=>t.measurements ?? []).findLast(m=>m.runtimeArtifact===measurement.runtimeArtifact)
   if(latest?.id!==measurement.id)return fail('measurement-superseded','A newer measurement exists for this artifact; inspect its result, not an earlier PASS')
@@ -119,29 +149,10 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     // Identify the actual stale report instead of forcing source/registry
     // exploration. A missing report is stale too; never strip a receipt footer
     // or ignore edited evidence to make it pass.
-    const changedReports=[]
-    for(const report of measurement.reports)
-      if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
-    const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
-    const designInputsChanged=measurement.designInputRevision !== undefined &&
-      measurement.designInputRevision !== designInputRevision(run.workspacePath)
+    const {changedReports,changedSources,designInputsChanged,dependenciesChanged,checkInputs,artifactMatches} =
+      await readInputs(build,smoke,proof,artifact)
     const designInputsMissing=measurement.designInputRevision === undefined &&
       purpose !== 'preview' && ['design-led-first-version','complete-game'].includes(run.creation?.initialDelivery ?? '')
-    const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
-    // Export identity and observed runtime evidence are different facts. A
-    // source-only edit must not be described as changed runtime bytes. These
-    // comparisons do not accept a new build or rerun/reuse any test.
-    const contentChecks=measurement.checks.filter(check =>
-      ['content-structure','content-layout','content-resources'].includes(check.id))
-    const checkInputs=await Promise.all([build,smoke,...contentChecks,
-      ...consumption.flatMap(id=>measurement.checks.filter(c=>c.id===id))].map(async check=>({
-      // Source/dependency drift has its own comparison above. It does not
-      // change the saved check's inputs or checker version, so do not report
-      // the same edit as an additional, unrelated build-check failure.
-      id:check.id,savedStatus:check.status,inputsMatch:await checkIsCurrent(run.workspacePath,check,
-        check.id==='build'?{editableProject:true}:undefined),
-    })))
-    const artifactMatches=await artifactDigest(run.workspacePath,artifact.path,true).then(hash=>hash===artifact.sha256,()=>false)
     const buildOrArtifactChanged=!artifactMatches || checkInputs.some(check=>!check.inputsMatch)
     const changes={requirements:requirementsChanged,authorizedSourceSave:sourceSaveChanged,
       sources:changedSources,reports:changedReports,dependencies:dependenciesChanged,designInputs:designInputsChanged,buildOrArtifact:buildOrArtifactChanged,
@@ -186,80 +197,4 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     return fail('measurement-inspection-failed','Current inputs could not be inspected; saved checks are historical, not current acceptance: '+
       (error instanceof Error?error.message:String(error)))
   }
-}
-export async function measuredFiles(run: Run, selected: {artifact: FileVersion; smoke: CheckResult}) {
-  const files = new Map<string, string>()
-  for (const path of await staticArtifactFiles(run.workspacePath, selected.artifact.path)) {
-    const relative = path.slice(selected.artifact.path.length + 1)
-    if (relative.split('/').some(part => part.startsWith('.')))
-      throw new WorkflowError('preview-private-file', 'Static artifact contains a private dot path; exclude it from the build')
-    const recorded = selected.smoke.inputs.find(file => file.path === path)
-    if (!recorded || !selected.smoke.coverage!.files.includes(path))
-      throw new WorkflowError('preview-unverified', 'Static file is outside measured coverage: '+path)
-    files.set(relative, recorded.sha256)
-  }
-  return files
-}
-export async function exportAgentMeasuredBuild(run:Run,measurementId:string,
-  guard:{read():Promise<Run|undefined>;busy(run:Run):boolean},kind:'static'|'project'='static') {
-  const selected=await selectAgentMeasuredBuild(run,measurementId,guard.busy(run))
-  return exportSelection(run,selected,selected.build.projectBuild,selected.build.projectBuild!.excludedReports,
-    {attemptId:selected.turn.attemptId,measurementId,requirementsRevision:selected.measurement.requirementsRevision,
-      reports:selected.measurement.reports,...(selected.measurement.consumption?{
-        consumption:selected.measurement.consumption,consumptionChecks:selected.measurement.checks.filter(c=>
-          selected.measurement.consumption!.checks.some(id=>id===c.id)).map(({inputs:_inputs,...check})=>check)}: {})},
-    guard,kind,()=>selectAgentMeasuredBuild(run,measurementId,guard.busy(run)),true)
-}
-async function exportSelection(run:Run,selected:{smoke:CheckResult;artifact:FileVersion},proof:CheckResult['projectBuild'],
-  reports:string[],identity:{attemptId:string;measurementId?:string;requirementsRevision?:string;reports?:FileVersion[];
-    consumption?:AgentMeasurement['consumption'];consumptionChecks?:Array<Omit<CheckResult,'inputs'>>},
-  guard:{read():Promise<Run|undefined>;busy(run:Run):boolean},kind:'static'|'project',validate:()=>Promise<unknown>,editable:boolean) {
-  const files = await measuredFiles(run, selected), entries = []
-  const verifySources = async () => {
-    if(!editable || proof?.version!==EDITABLE_BUILD_CHECK_VERSION ||
-      proof.artifact.path!==selected.artifact.path || proof.artifact.sha256!==selected.artifact.sha256 || !proof.files.length)
-      throw new WorkflowError('project-unverified','This measured build has no actual editable source-copy build evidence. Submit an authorized editableProject build/runtime-smoke task; download never rebuilds or upgrades old evidence.')
-    if(!sameFiles(proof.files,await projectFiles(run.workspacePath,selected.artifact.path,reports)) ||
-      proof.dependencySha256!==await projectDependencies(run.workspacePath))
-      throw new WorkflowError('project-source-changed','Exportable source/dependencies changed since the measured build. Rebuild and remeasure the affected version; no automatic retry.')
-  }
-  if(kind==='project') {
-    await verifySources()
-    for(const file of proof!.files) {
-      const target=resolve(run.workspacePath,file.path)
-      if(await realpath(target)!==target)throw new WorkflowError('export-stale','Source became an alias: '+file.path)
-      const data=await readFile(target)
-      if(digest(data)!==file.sha256)throw new WorkflowError('export-stale','Source changed: '+file.path)
-      entries.push({path:'project/'+file.path,data})
-    }
-  }
-  for (const [path, sha256] of files) {
-    const target = resolve(run.workspacePath, selected.artifact.path, path)
-    if (await realpath(target) !== target) throw new WorkflowError('export-stale', 'Measured file became an alias: '+path)
-    const data = await readFile(target)
-    if (digest(data) !== sha256) throw new WorkflowError('export-stale', 'Measured file changed: '+path)
-    entries.push({ path: (kind==='project'?'project/'+selected.artifact.path+'/':'build/')+path, data })
-  }
-  // Catch changed/added/removed files and upstream changes during collection.
-  await validate()
-  if(kind==='project')await verifySources()
-  const after = await guard.read()
-  if (!after || after.id !== run.id || after.workspacePath !== run.workspacePath || after.version !== run.version || after.writer || guard.busy(after))
-    throw new WorkflowError('export-stale', 'Workflow changed during export; refresh. No partial package was returned.')
-  const receipt = { protocol: kind==='project'?'bgs.measured-project-export.1':'bgs.measured-static-export.1', runId: run.id, ...identity,
-    artifact: selected.artifact, files: entries.map(e=>({path:e.path,sha256:digest(e.data)})),
-    check: selected.smoke, deliveryEligible: false,
-    ...(kind==='project'?{sourceBuild:{version:proof!.version,runtime:proof!.runtime,dependencySha256:proof!.dependencySha256},
-      instructions:['Open project/ as the editable project root. Use its package.json scripts and saved lockfile to install dependencies/build in a compatible Bun environment.',
-        'To play the included tested version, serve project/'+selected.artifact.path+'/ as the HTTP root. Rebuilding or editing creates a new, unmeasured version.']} : {}),
-    limitations: [kind==='project'?'Exact exportable source bytes actually built plus the same measured static output. Private dot config, host state, saved Review reports and installed node_modules are excluded. Fresh dependency installation, bit-reproducible rebuild, OS/network isolation and full game quality are not certified.':'Only the measured static build, not an editable source project or full game acceptance. Serve build/ as the HTTP root; file:// may not load modules/resources.', ...(selected.smoke.coverage?.limitations ?? [])] }
-  // Receipt omits workflow input/requirement metadata, host state and tokens;
-  // explicit project source paths are already listed with their archived bytes.
-  const { inputs: _inputs, ...publicCheck } = selected.smoke
-  entries.push({ path: 'measurement.json', data: Buffer.from(JSON.stringify({ ...receipt, check: publicCheck }, null, 2)) })
-  // Existing ZIP32 writer: fail explicitly rather than silently wrapping fields.
-  if (entries.length > 65535 || entries.some(f => Buffer.byteLength(f.path) > 65535) ||
-      entries.reduce((n, f) => n + f.data.length + Buffer.byteLength(f.path)*2 + 76, 22) >= 0xffffffff)
-    throw new WorkflowError('export-too-large', 'This package exceeds ZIP32 support; no truncated archive returned', 400)
-  return { data: createZipArchive(entries), artifact: selected.artifact, filename: (kind==='project'?'project-':'measured-')+(identity.measurementId ?? identity.attemptId)+'.zip', kind }
 }

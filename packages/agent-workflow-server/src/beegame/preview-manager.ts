@@ -60,6 +60,7 @@ type PreviewRecord = {
   internalUrl?: string
   expectsPublicPath?: boolean
   processes?: BeeGamePreviewProcess[]
+  startup?: { controller: AbortController; signal: AbortSignal; promise: Promise<BeeGamePreviewSnapshot> }
 }
 
 type PackageManifest = {
@@ -131,117 +132,102 @@ export class BeeGamePreviewManager {
     options.signal?.throwIfAborted()
     const workspacePath = normalizeWorkspacePath(options.workspacePath)
     const existing = this.records.get(options.sessionId)
-    if (
-      existing &&
-      sameWorkspace(existing.snapshot.workspacePath, workspacePath) &&
-      (existing.snapshot.mode ?? 'development') === (options.mode ?? 'development') &&
-      existing.snapshot.status === 'running'
-    ) {
-      return { ...existing.snapshot }
+    if (existing && !sameWorkspace(existing.snapshot.workspacePath, workspacePath) &&
+        ['starting', 'running'].includes(existing.snapshot.status))
+      throw Error('Preview session is already bound to another workspace')
+    if (existing && sameWorkspace(existing.snapshot.workspacePath, workspacePath) &&
+        (existing.snapshot.mode ?? 'development') === (options.mode ?? 'development')) {
+      if (existing.snapshot.status === 'running') return { ...existing.snapshot }
+      if (existing.startup && !existing.startup.signal.aborted) return existing.startup.promise
     }
 
     this.stop(options.sessionId, workspacePath)
+    const controller = new AbortController()
+    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
+    // Register before planning yields, so concurrent starts and stop see it.
+    const record: PreviewRecord = { snapshot: this.createSnapshot(options.sessionId, workspacePath, 'starting', {
+      mode: options.mode ?? 'development', message: 'Preview is preparing',
+    }) }
+    this.records.set(options.sessionId, record)
+    const promise = this.startPreview(options.sessionId, workspacePath, record, signal)
+      .finally(() => { delete record.startup })
+    record.startup = { controller, signal, promise }
+    return promise
+  }
 
-    const publicPath = this.publicPath(options.sessionId)
-    const plan = await createPreviewPlan(
-      workspacePath,
-      this.portStart,
-      this.allocatePort,
-      publicPath,
-      options.mode ?? 'development',
-    )
-    if (!plan.supported) {
-      const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'unsupported', {
-        message: plan.message,
-      })
-      this.records.set(options.sessionId, { snapshot })
-      return snapshot
-    }
-
-    options.signal?.throwIfAborted()
-    const startedAt = new Date().toISOString()
-    const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'starting', {
-      mode: options.mode ?? 'development',
-      url: '',
-      port: plan.port,
-      command: plan.command.join(' '),
-      script: plan.script,
-      entrypoint: plan.entrypoint,
-      message: `Preview starting at ${plan.url}`,
-      updatedAt: startedAt,
+  private async startPreview(sessionId: string, workspacePath: string, record: PreviewRecord,
+    signal: AbortSignal): Promise<BeeGamePreviewSnapshot> {
+    let onAbort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal.reason)
+      signal.addEventListener('abort', onAbort, { once: true })
     })
-    const processes: BeeGamePreviewProcess[] = []
     try {
+      signal.throwIfAborted()
+      const publicPath = this.publicPath(sessionId)
+      const plan = await Promise.race([createPreviewPlan(workspacePath, this.portStart, this.allocatePort,
+        publicPath, record.snapshot.mode ?? 'development'), cancelled])
+      signal.throwIfAborted()
+      if (!plan.supported) {
+        record.snapshot = this.createSnapshot(sessionId, workspacePath, 'unsupported', { message: plan.message })
+        return { ...record.snapshot }
+      }
+      record.snapshot = { ...record.snapshot, port: plan.port, command: plan.command.join(' '),
+        script: plan.script, entrypoint: plan.entrypoint, message: `Preview starting at ${plan.url}`,
+        updatedAt: new Date().toISOString() }
+      const processes: BeeGamePreviewProcess[] = []
+      record.processes = processes
+      record.expectsPublicPath = plan.command.includes('--base') && plan.command.includes(publicPath)
       for (const processPlan of plan.processes) processes.push(this.runner(processPlan.command, {
         cwd: processPlan.cwd,
         workspacePath,
         env: buildPreviewProcessEnv(processPlan, plan),
         onOutput: text => {
-          const record = this.records.get(options.sessionId)
-          if (!record || record.processes !== processes) return
+          if (this.records.get(sessionId) !== record || record.processes !== processes) return
           const internalUrl = processPlan.role === 'client'
             ? extractPreviewUrl(text) || record.internalUrl || ''
             : record.internalUrl || ''
           if (internalUrl) record.internalUrl = internalUrl
           record.snapshot = {
             ...record.snapshot,
-            url: this.publicUrl(options.sessionId, internalUrl) || record.snapshot.url,
+            url: this.publicUrl(sessionId, internalUrl) || record.snapshot.url,
             status: record.snapshot.status === 'running' ? 'running' : 'starting',
             message: text.trim().slice(0, 500) || record.snapshot.message,
             updatedAt: new Date().toISOString(),
           }
         },
       }))
+      this.watchPreviewProcesses(sessionId, processes, plan)
+      const readiness = await Promise.race([checkPreviewPlanReadiness(plan, this.readinessProbe, signal), cancelled])
+      signal.throwIfAborted()
+      if (this.records.get(sessionId) !== record || record.processes !== processes) return { ...record.snapshot }
+      if (!readiness.ready) {
+        await Promise.all(this.stopProcesses(record).map(process => process.exited))
+        signal.throwIfAborted()
+        record.snapshot = {
+          ...record.snapshot, status: 'failed', url: '',
+          message: `${readiness.message} Expected ${plan.url} from ${plan.entrypoint} script "${plan.script}". The process receives PORT=${plan.port}; arbitrary scripts must honor that port (BGS does not infer custom positional arguments or adopt another port). ${record.snapshot.message || ''}`.trim(),
+          updatedAt: new Date().toISOString(),
+        }
+        return { ...record.snapshot }
+      }
+      record.snapshot = { ...record.snapshot, status: 'running',
+        url: this.publicUrl(sessionId, plan.url) || plan.url,
+        message: `Preview running at ${this.publicUrl(sessionId, plan.url) || plan.url}`,
+        updatedAt: new Date().toISOString() }
+      record.internalUrl = plan.url
+      return { ...record.snapshot }
     } catch (error) {
-      for (const process of processes) process.kill()
+      // A superseded start owns only this record, never its replacement.
+      const processes = this.stopProcesses(record)
+      if (record.snapshot.status === 'starting') record.snapshot = { ...record.snapshot,
+        status: signal.aborted ? 'stopped' : 'failed', url: '',
+        message: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() }
       await Promise.all(processes.map(process => process.exited))
       throw error
-    }
-    this.records.set(options.sessionId, {
-      snapshot,
-      processes,
-      expectsPublicPath: plan.command.includes('--base') && plan.command.includes(publicPath),
-    })
-    this.watchPreviewProcesses(options.sessionId, processes, plan)
-    const signal = options.signal
-    let onAbort: (() => void) | undefined
-    const cancelled = signal ? new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(signal.reason)
-      signal.addEventListener('abort', onAbort, { once: true })
-      if (signal.aborted) onAbort()
-    }) : undefined
-    let readiness: Awaited<ReturnType<typeof checkPreviewPlanReadiness>>
-    try {
-      const ready = checkPreviewPlanReadiness(plan, this.readinessProbe, signal)
-      readiness = await (cancelled ? Promise.race([ready, cancelled]) : ready)
-    } catch (error) {
-      await this.stopAndWait(options.sessionId, workspacePath)
-      throw error
     } finally {
-      if (onAbort) signal!.removeEventListener('abort', onAbort)
+      signal.removeEventListener('abort', onAbort)
     }
-    const record = this.records.get(options.sessionId)
-    if (!record || record.processes !== processes) return { ...snapshot }
-    if (!readiness.ready) {
-      await this.stopAndWait(options.sessionId, workspacePath)
-      record.snapshot = {
-        ...record.snapshot,
-        status: 'failed',
-        url: '',
-        message: `${readiness.message} Expected ${plan.url} from ${plan.entrypoint} script "${plan.script}". The process receives PORT=${plan.port}; arbitrary scripts must honor that port (BGS does not infer custom positional arguments or adopt another port). ${record.snapshot.message || ''}`.trim(),
-        updatedAt: new Date().toISOString(),
-      }
-      return { ...record.snapshot }
-    }
-    record.snapshot = {
-      ...record.snapshot,
-      status: 'running',
-      url: this.publicUrl(options.sessionId, plan.url) || plan.url,
-      message: `Preview running at ${this.publicUrl(options.sessionId, plan.url) || plan.url}`,
-      updatedAt: new Date().toISOString(),
-    }
-    record.internalUrl = plan.url
-    return { ...record.snapshot }
   }
 
   async restart(options: BeeGamePreviewStartOptions): Promise<BeeGamePreviewSnapshot> {
@@ -260,8 +246,8 @@ export class BeeGamePreviewManager {
     if (resolvedWorkspace && !sameWorkspace(record.snapshot.workspacePath, resolvedWorkspace)) {
       return { ...record.snapshot }
     }
-    for (const process of record.processes ?? []) process.kill()
-    delete record.processes
+    record.startup?.controller.abort(new Error('Preview startup stopped'))
+    this.stopProcesses(record)
     record.snapshot = {
       ...record.snapshot,
       status: 'stopped',
@@ -280,11 +266,15 @@ export class BeeGamePreviewManager {
   }
 
   dispose(): void {
-    for (const record of this.records.values()) {
-      for (const process of record.processes ?? []) process.kill()
-      delete record.processes
-    }
+    for (const [sessionId, record] of this.records) this.stop(sessionId, record.snapshot.workspacePath)
     this.records.clear()
+  }
+
+  private stopProcesses(record: PreviewRecord): BeeGamePreviewProcess[] {
+    const processes = record.processes ?? []
+    for (const process of processes) process.kill()
+    delete record.processes
+    return processes
   }
 
   internalUrl(sessionId: string): string | undefined {

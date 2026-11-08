@@ -321,7 +321,7 @@ export type BeeGameTurnTools = {
   restartFromDesign?: { prompt: string; authorize(): Promise<void> }
   /** Host-validated final JSON; schema is model guidance, not an API output constraint. */
   finalOutput?: {
-    /** Native/Shell project writes remain denied; the host may authorize one document below. */
+    /** Project writes remain denied except the native docs/ scope authorized below. */
     readOnly?: boolean
     writeDocument?: { path: string; authorize(): Promise<void> }
     designReview?: {
@@ -339,6 +339,12 @@ export type BeeGameTurnTools = {
     accept(value: unknown): Promise<string>
   }
   workflow?: BeeGameHostToolCapability
+  /** Current assignment description for the native workflow tool; not serialized business state. */
+  workflowDescription?: string
+  /** Assignment-owned native role; absent for ordinary Agent work. */
+  baseInstructions?: string
+  /** Current host-committed readiness, not a model claim or quality verdict. */
+  implementationHandoff?: () => string | undefined
   /** Trusted current-turn asset command; native MCP uses the existing image service. */
   imageGenerationEntry?: string
 }
@@ -353,7 +359,6 @@ export type BeeGameSessionRunnerStartInput = BeeGameTurnTools & {
   /** Current confirmed requirements, also retained by the native instruction baseline. */
   confirmedBriefContext?: string
   /** Host-confirmed UI check conditions; never accepted from model tool input. */
-  uiLayoutConstraints?: import('./ui-layout-audit').LayoutConstraints
   resumeSessionId?: string
   nativeContext?: BeeGameNativeContext
   onNativeContext?(context: BeeGameNativeContext): void
@@ -475,8 +480,8 @@ type SessionRecord = {
   executionIdentity?: BeeGameRuntimeSnapshot['executionIdentity']
   /** Redact runtime credentials from persisted and streamed Chat events only. */
   redactVisible?: ReturnType<typeof createResponseRedactor>
+  baseInstructions?: string
   systemContext?: string
-  uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']
   preparingTurn?: boolean
   session: BeeGameSession
   /** Native runtime UUID, distinct from session.id (the BGS routing key). */
@@ -618,7 +623,7 @@ export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly subagentChat = new WeakMap<SessionRecord, ReturnType<typeof createNativeSubagentChatEnricher>>()
   private readonly snapshotInputs = new WeakMap<SessionRecord, {
-    source: BeeGameEvent[]; processed: number; events: BeeGameEvent[]
+    source: BeeGameEvent[]; processed: number; events: BeeGameEvent[]; eventCount: number; toolUseCount: number; ordered?: BeeGameEvent[]
   }>()
   private readonly eventSubscribers = new Map<
     string,
@@ -636,6 +641,7 @@ export class BeeGameSessionManager {
       userId?: string,
       authToken?: string,
       modelConfigId?: string,
+      signal?: AbortSignal,
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
     private readonly usageBillingBackend: BeeGameSessionUsageBillingBackend = {},
     private readonly allowExternalRuntimeEnv = false,
@@ -957,8 +963,8 @@ export class BeeGameSessionManager {
     record.runner = null
     record.nativeSessionId = nativeSessionId
     record.systemContext = undefined
+    record.baseInstructions = undefined
     delete record.nativeContext
-    record.uiLayoutConstraints = undefined
     this.persistRuntimeSnapshot(record)
   }
 
@@ -975,13 +981,14 @@ export class BeeGameSessionManager {
   runtimeSnapshot(
     sessionId: string,
     workspacePath?: string,
+    recoveredEvents?: BeeGameEvent[],
   ): BeeGameRuntimeSnapshot {
     const record = this.sessions.get(sessionId)
     if (record) return this.deriveRuntimeSnapshot(record)
     const persisted = this.readPersistedRuntimeSnapshot(sessionId)
     if (workspacePath) {
       const root = resolveExistingPath(workspacePath)
-      const recoveredTranscript = readExistingTranscriptForResume(
+      const recoveredTranscript = recoveredEvents !== undefined ? (recoveredEvents.length ? { events: recoveredEvents } : undefined) : readExistingTranscriptForResume(
         sessionId,
         root,
       )
@@ -1016,12 +1023,25 @@ export class BeeGameSessionManager {
       return deriveRuntimeSnapshotFromEvents(
         sessionId,
         root,
-        readExistingTranscriptForResume(sessionId, root)?.events ?? [],
+        recoveredEvents ?? readExistingTranscriptForResume(sessionId, root)?.events ?? [],
         undefined,
         { recoveredFromTranscript: true },
       )
     }
     throw new Error('Session not found')
+  }
+
+  /** Host status uses the existing incremental index, never full Chat formatting. */
+  runtimeStateFacts(sessionId: string) {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    this.runtimeSnapshotInputs(record)
+    const index = this.snapshotInputs.get(record)!
+    index.ordered ??= index.events.filter(event => !isThinkingProtocolControlEvent(event))
+      .map(event => ['turn.failed', 'session.failed'].includes(event.type)
+        ? formatBeeGameEventForDisplay(event, record.language) : event)
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id - right.id)
+    return { events: index.ordered, counters: { eventCount: index.eventCount, toolUseCount: index.toolUseCount } }
   }
 
   events(sessionId: string, after = 0): BeeGameEvent[] {
@@ -1209,7 +1229,7 @@ export class BeeGameSessionManager {
       onNativeStart?: () => void
       executionIdentity?: Pick<NonNullable<BeeGameRuntimeSnapshot['executionIdentity']>, 'attemptId'|'workerId'|'fence'>
       prepareTurn?: () => Promise<BeeGameTurnTools & { systemContext?: string; turnContext?: string;
-        uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']; close?: () => Promise<void> }>
+        close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
       onTurnReady?: () => void | Promise<void>
       usageExternallyAccounted?: boolean
@@ -1245,12 +1265,11 @@ export class BeeGameSessionManager {
       }
       const context = await display?.prepareTurn?.()
       close = context?.close
-      if (context && (context.systemContext !== record.systemContext ||
-          JSON.stringify(context.uiLayoutConstraints) !== JSON.stringify(record.uiLayoutConstraints))) {
+      if (context && (context.baseInstructions !== record.baseInstructions || context.systemContext !== record.systemContext)) {
         await this.disposeRunner(record.runner, record)
         record.runner = null
         record.systemContext = context.systemContext
-        record.uiLayoutConstraints = context.uiLayoutConstraints
+        record.baseInstructions = context.baseInstructions
       }
       if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       if (display?.confirmedBriefContext) {
@@ -1328,7 +1347,7 @@ export class BeeGameSessionManager {
         },
         display?.nativeGoal,
         display?.nativeRecovery,
-        { workflow: context?.workflow, finalOutput: context?.finalOutput, restartFromDesign: context?.restartFromDesign, imageGenerationEntry: context?.imageGenerationEntry },
+        { baseInstructions: context?.baseInstructions, workflow: context?.workflow, workflowDescription: context?.workflowDescription, implementationHandoff: context?.implementationHandoff, finalOutput: context?.finalOutput, restartFromDesign: context?.restartFromDesign, imageGenerationEntry: context?.imageGenerationEntry },
         display?.onNativeStart,
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
@@ -1591,7 +1610,7 @@ export class BeeGameSessionManager {
         createIfMissing: false,
         engine: record.confirmedBriefContext ? JSON.parse(record.confirmedBriefContext).settings?.engine : undefined,
       })
-      const additionalEnv = await this.loadAdditionalRuntimeEnv(record)
+      const additionalEnv = await this.loadAdditionalRuntimeEnv(record, signal)
       // Only the host connection resolver supplies billing provenance. A model
       // config's arbitrary env must not select whether the user pays BGS.
       billingSource = getModelBillingSource(additionalEnv)
@@ -1624,7 +1643,6 @@ export class BeeGameSessionManager {
           ...(nativeRecovery ? { nativeRecovery } : {}),
           systemContext: record.systemContext,
           confirmedBriefContext: record.confirmedBriefContext,
-          uiLayoutConstraints: record.uiLayoutConstraints,
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }
             : {}),
@@ -1790,6 +1808,7 @@ export class BeeGameSessionManager {
 
   private async loadAdditionalRuntimeEnv(
     record: SessionRecord,
+    signal: AbortSignal,
   ): Promise<Record<string, string>> {
     try {
       return await this.getAdditionalRuntimeEnv(
@@ -1797,8 +1816,10 @@ export class BeeGameSessionManager {
         record.userId,
         record.authToken,
         record.session.modelConfigId,
+        signal,
       )
     } catch (error) {
+      signal.throwIfAborted()
       if (!isSupabaseRuntimeEnvAuthError(error) || !record.getValidAuthToken) {
         throw error
       }
@@ -1808,12 +1829,14 @@ export class BeeGameSessionManager {
           'Workflow authentication expired and could not be refreshed. Please sign in again.',
         )
       }
+      signal.throwIfAborted()
       record.authToken = refreshed
       return this.getAdditionalRuntimeEnv(
         record.userDataRoot,
         record.userId,
         refreshed,
         record.session.modelConfigId,
+        signal,
       )
     }
   }
@@ -2359,16 +2382,23 @@ export class BeeGameSessionManager {
   private runtimeSnapshotInputs(record: SessionRecord): BeeGameEvent[] {
     let index = this.snapshotInputs.get(record)
     if (!index || index.source !== record.events || index.processed > record.events.length) {
-      index = {source: record.events, processed: 0, events: []}
+      index = {source: record.events, processed: 0, events: [], eventCount: 0, toolUseCount: 0}
       this.snapshotInputs.set(record, index)
     }
-    // Only a derived host-status index. Consecutive detail frames with the same
-    // turn have no usage/lifecycle/tool-count facts; keep their last boundary
-    // for latest turn/time/status. Never filter raw Chat, native input, approval
-    // evidence or billing checkpoints. Unknown event types are retained.
+    // Compact only chronological bursts of the same detail type/turn. Type
+    // boundaries retain activity timestamps; counters retain every visible frame.
+    // Raw Chat, native history, approvals and billing checkpoints are unchanged.
+    // Unknown event types are retained.
     for (; index.processed < record.events.length; index.processed++) {
       const event = record.events[index.processed]!, previous = index.events.at(-1)
-      if (previous && isSnapshotDetailFrame(event) && isSnapshotDetailFrame(previous) && event.turnId === previous.turnId)
+      delete index.ordered
+      if (!isThinkingProtocolControlEvent(event)) {
+        index.eventCount++
+        if (event.type.startsWith('tool.')) index.toolUseCount++
+      }
+      if (previous && isSnapshotDetailFrame(event) && event.type === previous.type &&
+          !isThinkingProtocolControlEvent(event) && !isThinkingProtocolControlEvent(previous) &&
+          event.turnId === previous.turnId && event.createdAt >= previous.createdAt)
         index.events[index.events.length - 1] = event
       else index.events.push(event)
     }

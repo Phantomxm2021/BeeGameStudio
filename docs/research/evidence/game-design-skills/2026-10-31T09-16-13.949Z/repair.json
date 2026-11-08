@@ -1,0 +1,11 @@
+{
+  "sourceBefore": "81db9286e6a6a02302e766b47303dca9461e884fc85a99733de48bb03d7c0cee",
+  "sourceAfter": "5816588e27590e573a9a3fe26a2f199208635722371b304e1800694f814f8c5c",
+  "defect": "Restart retained the prior token; two catches followed one restart path.",
+  "patch": {
+    "old_string": "/* restart cleanup */",
+    "new_string": "drops=[];"
+  },
+  "owner": "gameplay lifecycle",
+  "limitation": "Deliberately seeded fixture defect; not autonomous model discovery or a production project fix."
+}

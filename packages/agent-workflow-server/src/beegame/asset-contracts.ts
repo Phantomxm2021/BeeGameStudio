@@ -207,6 +207,8 @@ export type BeeGameAssetUploadOptions = {
 }
 
 export type BeeGameAuthoredResourceInput = {
+  // Expected bytes from an acquisition result, checked during the existing hash read.
+  acquisition_hashes?: Readonly<Record<string, string>>
   id: string
   fulfills?: string[]
   root_path: string
@@ -487,18 +489,28 @@ export async function uploadBeeGameAsset(
 export async function registerBeeGameLocalResources(
   workspacePath: string,
   inputs: readonly (BeeGameAuthoredResourceInput & { source?: Extract<BeeGameProjectResourceSource, { type: 'web' | 'agent-authored' | 'resource-library' }> })[],
-  options: { additionalFormatCapabilities?: readonly string[];
+  options: { additionalFormatCapabilities?: readonly string[]; resourceLibraryUsage?: ResourceLibraryUsage;
     projectTarget?: BeeGameAssetManifest['project_target']; requirements?: BeeGameAssetManifest['requirements'] } = {},
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
   let manifest = await readBeeGameAssetManifest(root)
+  // The host owns the confirmed preference. Fill an omitted value, but never
+  // silently overwrite an explicit conflicting request or saved project setting.
+  const bindTarget = (target: BeeGameAssetManifest['project_target']) => {
+    if (!target || !options.resourceLibraryUsage) return target
+    if (target.resource_library_usage !== undefined && target.resource_library_usage !== options.resourceLibraryUsage)
+      throw Error('Resource configuration conflicts with confirmed resource_library_usage: ' + options.resourceLibraryUsage)
+    return { ...target, resource_library_usage: options.resourceLibraryUsage }
+  }
+  const projectTarget = bindTarget(options.projectTarget)
+  manifest = { ...manifest, project_target: bindTarget(manifest.project_target) }
   let addedFormats: string[] = []
-  if (options.projectTarget && manifest.project_target) {
+  if (projectTarget && manifest.project_target) {
     const issues: string[] = []
-    validateTarget(options.projectTarget, issues)
+    validateTarget(projectTarget, issues)
     if (issues.length) throw new BeeGameAssetManifestError(issues)
     const { asset_format_capabilities: existingFormats, ...existingTarget } = manifest.project_target
-    const { asset_format_capabilities: suppliedFormats, ...suppliedTarget } = options.projectTarget
+    const { asset_format_capabilities: suppliedFormats, ...suppliedTarget } = projectTarget
     if (!isDeepStrictEqual(existingTarget, suppliedTarget) ||
         !Array.isArray(suppliedFormats) || existingFormats.some(format => !suppliedFormats.includes(format)))
       throw new Error('Registration cannot change the established platform, runtime, roots or source preferences, or remove supported formats.')
@@ -509,8 +521,8 @@ export async function registerBeeGameLocalResources(
     if (existing && !isDeepStrictEqual(existing, requirement))
       throw new Error('Registration cannot redefine an existing requirement: ' + requirement.id)
   }
-  if (options.projectTarget || options.requirements) manifest = parseCanonicalBeeGameAssetManifest({
-    ...manifest, project_target: manifest.project_target ?? options.projectTarget,
+  if (projectTarget || options.requirements) manifest = parseCanonicalBeeGameAssetManifest({
+    ...manifest, project_target: manifest.project_target ?? projectTarget,
     requirements: [...new Map([...manifest.requirements, ...options.requirements ?? []].map(item => [item.id, item])).values()],
   })
   const establishedTarget = requireProjectTarget(manifest)
@@ -604,16 +616,14 @@ export async function registerBeeGameLocalResources(
         Boolean(programmaticAudio),
       )
     }
-    const hashes = Object.fromEntries(
-      await Promise.all(
-        filePaths.map(async path => [
-          path,
-          sha256(
-            new Uint8Array(await readFile(resolveInsideWorkspace(root, path))),
-          ),
-        ]),
-      ),
-    )
+    let observedFacts: Record<string, string | number | boolean> | undefined
+    const hashes = Object.fromEntries(await Promise.all(filePaths.map(async path => {
+      const bytes = new Uint8Array(await readFile(resolveInsideWorkspace(root, path)))
+      const actual = sha256(bytes), expected = input.acquisition_hashes?.[path]
+      if (expected !== undefined && actual !== expected) throw new Error('Acquisition file changed: ' + path)
+      if (input.acquisition_hashes && path === rootPath) observedFacts = inspectResourceBytes(path, bytes)
+      return [path, actual]
+    })))
     const resource: BeeGameProjectResource = {
       id,
       fulfills: uniqueStrings(input.fulfills ?? existing?.fulfills ?? []),
@@ -647,8 +657,8 @@ export async function registerBeeGameLocalResources(
       ...(input.content_profile
         ? { content_profile: structuredClone(input.content_profile) }
         : {}),
-      ...(input.technical_facts
-        ? { technical_facts: { ...input.technical_facts } }
+      ...(input.technical_facts || observedFacts
+        ? { technical_facts: { ...input.technical_facts, ...observedFacts } }
         : {}),
       ...(input.dependencies ? { dependencies: structuredClone(input.dependencies) } : {}),
     }

@@ -66,8 +66,8 @@ const body = {
   text: {
     format: {
       type: 'json_schema',
-      name: 'fixture',
-      schema: { type: 'object', properties: { accepted: { type: 'boolean' } } },
+      name: 'fixture', strict: true,
+      schema: { type: 'object', properties: { accepted: { type: 'boolean' } }, required: ['accepted'], additionalProperties: false },
     },
   },
 }
@@ -169,15 +169,15 @@ test('native requests preserve images, namespaces, tool results and explicit str
     })
     if (protocol === 'chat-completions')
       expect(native.body).toMatchObject({
-        response_format: { type: 'json_schema' },
+        response_format: { type: 'json_schema', json_schema: {strict:true,schema:body.text.format.schema} },
       })
     if (protocol === 'anthropic-messages')
       expect(native.body).toMatchObject({
-        output_config: { format: { type: 'json_schema' } },
+        output_config: { format: { type: 'json_schema',schema:body.text.format.schema } },
       })
     if (protocol === 'gemini')
       expect(native.body).toMatchObject({
-        generationConfig: { responseMimeType: 'application/json' },
+        generationConfig: { responseMimeType: 'application/json',responseJsonSchema:body.text.format.schema },
       })
   }
 })
@@ -658,8 +658,8 @@ test.each(['chat-completions', 'anthropic-messages', 'gemini'] as const)('unknow
   expect(conversation({ input: input.slice(0, 1) }, protocol).messages.some(item => item.role === 'tool')).toBe(false)
 })
 
-test('Go Responses sends native input and events unchanged with stable session headers', async () => {
-  const config = { ...base, protocol: 'responses' as const, baseUrl: 'https://opencode.ai/zen/go/v1', sessionId: 'go-responses-conversation' }
+test.each(['https://opencode.ai/zen/go/v1', 'https://opencode.ai/inference/go/openai/v1'])('Go Responses preserves native input and event contents with stable session headers: %s', async baseUrl => {
+  const config = { ...base, protocol: 'responses' as const, baseUrl, sessionId: 'go-responses-conversation' }
   const body = { model: 'new-responses-model', stream: true, input: [
     { type: 'function_call_output', call_id: 'call-1', output: 'tool result' },
   ], tools: [{ type: 'function', name: 'probe', parameters: { type: 'object' } }] }
@@ -675,7 +675,12 @@ test('Go Responses sends native input and events unchanged with stable session h
     expect(headers.get('authorization')).toBe('Bearer ' + config.apiKey)
     return new Response(wire, { headers: { 'content-type': 'text/event-stream' } })
   })
-  for (let i = 0; i < 2; i++) expect(await (await requestProvider(config, body, request, signal())).text()).toBe(wire)
+  for (let i = 0; i < 2; i++) {
+    // Declared tools use the same-response adapter; SSE framing may be encoded
+    // again, but every native event field and request must remain unchanged.
+    expect(await Array.fromAsync(parseSse(await requestProvider(config, body, request, signal()))))
+      .toEqual(await Array.fromAsync(parseSse(new Response(wire))))
+  }
   await expect(requestProvider({ ...config, sessionId: undefined }, body, request, signal())).rejects.toThrow('stable model session')
   expect(calls).toBe(2)
 })

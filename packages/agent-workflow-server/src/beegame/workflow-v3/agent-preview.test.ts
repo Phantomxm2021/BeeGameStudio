@@ -4,14 +4,14 @@ import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {createRun} from './state'
 import {previewRunState} from './store'
-import {createMeasuredPreview} from './measured-preview'
+import {createStaticPreview} from './static-preview'
 import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {previewTestHostDocument} from '@bee-game-studio/agent-workflow/preview-environment'
 import {sharedPlaywright} from '../shared-playwright'
 
 test('ordinary Preview preserves its opaque frame and rejects active writers',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-writer-preview-')))
-  let preview:ReturnType<typeof createMeasuredPreview>|undefined,browser:any,viewUrl=''
+  let preview:ReturnType<typeof createStaticPreview>|undefined,browser:any,viewUrl=''
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     if(new URL(request.url).hostname==='localhost'&&new URL(request.url).pathname==='/host')return new Response(previewTestHostDocument(new URL(viewUrl)).body,{headers:{'content-type':'text/html'}})
     return await preview?.handle(request) ?? new Response('No API on Preview origin',{status:404})
@@ -24,7 +24,7 @@ test('ordinary Preview preserves its opaque frame and rejects active writers',as
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'touch MUST_NOT_BUILD'}}))
     const run=createRun({projectId:'project',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
     run.writer={attemptId:'first',workerId:'worker',fence:1};run.fence=1
-    preview=createMeasuredPreview({origin:'http://localhost:'+server.port,capabilities:createPreviewCapabilityManager(),
+    preview=createStaticPreview({origin:'http://localhost:'+server.port,capabilities:createPreviewCapabilityManager(),
       readRun:async(id,owner)=>id===run.projectId&&owner===run.ownerId?structuredClone(run):undefined,isBusy:()=>Boolean(run.writer)})
     await expect(preview.openCandidate(run)).rejects.toThrow('writer to stop')
     delete run.writer
@@ -78,7 +78,7 @@ test('candidate files minimize state reads while retaining identity, race, capab
       const capabilities=createPreviewCapabilityManager()
       const issueRoute=capabilities.issueRouteId
       capabilities.issueRouteId=(session,owner)=>{capabilitySession=session;return issueRoute(session,owner)}
-      const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities,isBusy:()=>false,
+      const preview=createStaticPreview({origin:'http://localhost:12345',capabilities,isBusy:()=>false,
         readRun:async()=>{full++;return structuredClone(run)},
         readPreviewState:async()=>{
           small++

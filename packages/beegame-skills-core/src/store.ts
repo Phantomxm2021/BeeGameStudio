@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
+  readlinkSync,
+  symlinkSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -22,9 +25,7 @@ import {
 
 const STORE_FILE = 'user-skills.json'
 const SKILL_METADATA_FILE = 'skill.json'
-const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'skills')
-const RUNTIME_BUILTINS_MANIFEST = '.beegame-builtins.json'
-const RUNTIME_BUILTIN_MARKER = '.beegame-builtin'
+const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'bgs', 'skills')
 const BUILTIN_SKILLS_DIR = 'bgs-game-skills'
 const MAX_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 96 * 1024
@@ -77,7 +78,7 @@ export function getDefaultBeeGameSkillsStoreDir(): string {
 /** Resolve host configuration without requiring game Skills for model-only requests. */
 export function resolveBuiltinSkillsDirectory(): string {
   return resolve(process.env.BEEGAME_BUILTIN_SKILLS_DIR ?? fileURLToPath(
-    new URL('../../../.beegame/skills/bgs-game-skills/', import.meta.url),
+    new URL('../../../.beegame/plugins/bgs-game-development/', import.meta.url),
   ))
 }
 
@@ -88,45 +89,6 @@ export function getBuiltinSkillsDirectory(directory = resolveBuiltinSkillsDirect
     throw new Error(`BeeGameStudio built-in Skills are unavailable: ${directory}`)
   }
   return directory
-}
-
-/**
- * Remove only stale BeeGameStudio-projected built-ins from the isolated runtime.
- * User-imported skills are deliberately left untouched: they are explicit user
- * configuration. The bundled catalog is loaded read-only from its source.
- */
-export function clearRuntimeBuiltinSkills(
-  options: LocalBeeGameSkillsStoreOptions = {},
-): void {
-  const runtimeSkillsDir = join(
-    options.dataDir ?? getDefaultBeeGameSkillsStoreDir(),
-    RUNTIME_SKILLS_DIR,
-  )
-  for (const skillName of readRuntimeBuiltinSkillNames(runtimeSkillsDir)) {
-    const skillDir = join(runtimeSkillsDir, skillName)
-    if (existsSync(join(skillDir, RUNTIME_BUILTIN_MARKER))) {
-      rmSync(skillDir, { recursive: true, force: true })
-    }
-  }
-  rmSync(join(runtimeSkillsDir, RUNTIME_BUILTINS_MANIFEST), { force: true })
-}
-
-function readRuntimeBuiltinSkillNames(runtimeSkillsDir: string): string[] {
-  try {
-    const parsed = JSON.parse(readFileSync(
-      join(runtimeSkillsDir, RUNTIME_BUILTINS_MANIFEST),
-      'utf8',
-    )) as unknown
-    if (!isRecord(parsed) || !Array.isArray(parsed.skills)) return []
-    return parsed.skills.filter((value): value is string => {
-      if (typeof value !== 'string' || !value || value === '.' || value === '..') {
-        return false
-      }
-      return basename(value) === value
-    })
-  } catch {
-    return []
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -285,14 +247,46 @@ export function materializeUserSkills(
 
   for (const skill of enabled) {
     const skillDir = join(skillsDir, `user-${skill.slug}`)
-    rmSync(skillDir, { recursive: true, force: true })
+    const files = new Map(normalizeSkillFiles(skill.files).map(file => [file.path, `${file.content.trim()}\n`]))
+    const directories = new Set<string>()
+    for (const path of files.keys()) {
+      let parent = dirname(path)
+      while (parent !== '.') { directories.add(parent); parent = dirname(parent) }
+    }
+    // Only prune stale paths. Unchanged files and directories keep their identity.
+    const prune = (directory: string, prefix = '') => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = prefix + entry.name, target = join(directory, entry.name)
+        if (entry.isDirectory() && directories.has(path)) prune(target, path + '/')
+        else if (!entry.isFile() || !files.has(path)) rmSync(target, { recursive: true, force: true })
+      }
+    }
+    const current = lstatSync(skillDir, { throwIfNoEntry: false })
+    if (current && !current.isDirectory()) rmSync(skillDir, { recursive: true, force: true })
     mkdirSync(skillDir, { recursive: true })
-    for (const file of skill.files) {
-      const outputPath = join(skillDir, file.path)
+    prune(skillDir)
+    for (const [path, content] of files) {
+      const outputPath = join(skillDir, path)
+      if (existsSync(outputPath) && readFileSync(outputPath, 'utf8') === content) continue
       mkdirSync(dirname(outputPath), { recursive: true })
-      writeFileSync(outputPath, `${file.content.trim()}\n`, 'utf8')
+      const temporary = join(dirname(outputPath), '.bgs-skill-' + randomUUID())
+      writeFileSync(temporary, content, { flag: 'wx' })
+      try { renameSync(temporary, outputPath) }
+      catch (error) { rmSync(temporary, { force: true }); throw error }
     }
   }
+  // Saved native histories and path-based disable settings may reference the
+  // former upload directory. Keep aliases to the one native copy, not another
+  // discovery root or a stale second set of instructions.
+  const legacy = join(options.dataDir ?? getDefaultBeeGameSkillsStoreDir(), '.runtime', 'app', 'skills')
+  if (existsSync(legacy)) for (const entry of readdirSync(legacy, {withFileTypes:true})) {
+    if (!entry.name.startsWith('user-') || (!entry.isDirectory() && !entry.isSymbolicLink())) continue
+    const previous = join(legacy, entry.name), target = join(skillsDir, entry.name)
+    if (desiredDirs.has(entry.name) && entry.isSymbolicLink() && readlinkSync(previous) === target) continue
+    rmSync(previous, {recursive:true,force:true})
+    if (desiredDirs.has(entry.name)) symlinkSync(target, previous, process.platform === 'win32' ? 'junction' : 'dir')
+  }
+
 }
 
 function normalizeImportedSkill(input: BeeGameSkillImportInput): BeeGameUserSkill {

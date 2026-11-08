@@ -10,7 +10,7 @@ import { registerModelConnectionRoutes, validateBgsModelConfig } from './model-c
 import { defaultModelApiProtocol, validateModelAccess } from '@bee-game-studio/agent-workflow'
 import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
-import { createMeasuredPreview, type MeasuredPreviewManager, type CandidatePreview } from './beegame/workflow-v3/measured-preview'
+import { createStaticPreview, type StaticPreviewManager, type CandidatePreview } from './beegame/workflow-v3/static-preview'
 import { createPreviewStorageStore } from './beegame/preview-storage-store'
 import { WorkflowError, createRun } from './beegame/workflow-v3/state'
 import { agentGoalSchema } from './beegame/workflow-v3/agent-goal'
@@ -131,8 +131,8 @@ import { createHostedImageGenerationProvider } from './image-generation'
 import { createImageResultRequest } from './image-generation/image-result-network'
 import { hasChatGPTAccount } from './model-connections'
 import { getModelBillingSource, isPersonalModelBillingSource } from './model-billing-source'
-import { openImageGenerationAccess } from './image-generation/access'
-import { IMAGE_PROMPT_REVIEW_INSTRUCTIONS, imagePromptReviewSchema, imagePromptReviewInput, parseImagePromptReview } from './image-generation/prompt-review'
+import { createImageGenerationAccess } from './image-generation/access'
+import { IMAGE_PROMPT_REVIEW_INSTRUCTIONS, imagePromptReviewInput, parseImagePromptReview } from './image-generation/prompt-review'
 import { loadRuntimeImageConfig } from './image-generation/runtime-config'
 import { loadPersonalImageConnection, publicPersonalImageConnection, savePersonalImageConnection } from './image-generation/personal-connection'
 import { createImageBillingClient } from '@bee-game-studio/beegame-billing-core/image-billing'
@@ -223,6 +223,7 @@ import {
   deleteBeeGameIntakeJob,
   loadBeeGameIntakeJob,
   saveBeeGameIntakeJob,
+  type PersistedBeeGameIntakeJob,
 } from './beegame/intake-job-store'
 import { BEEGAME_USER_RESPONSE_SCOPE } from './beegame/user-response-scope'
 import { projectRuntimeDisplayReason } from './beegame/project-runtime-display'
@@ -357,6 +358,7 @@ type BeeGameIntakeJob = {
   result?: BeeGameIntakeAnalysis
   error?: string
   errorStatus?: number
+  errorDetails?: PersistedBeeGameIntakeJob['errorDetails']
   createdAt: number
   updatedAt: number
 }
@@ -407,6 +409,7 @@ export function createAgentWorkflowApp(
 ): Hono {
   validateSecretStorageAtStartup()
   const app = new Hono()
+  const localSingleProcess = process.env.BEEGAME_WORKFLOW_V3_STORE === 'local-single-process'
   let closing = false
   const runtimeStatusPath = '/api/admin/runtime-status'
   const activeRequests = new Set<Promise<unknown>>()
@@ -427,10 +430,10 @@ export function createAgentWorkflowApp(
     if (closing) return c.json({ error: 'BeeGame runtime is shutting down' }, 503, { 'Retry-After': '1' })
     await trackRequest(next())
   })
-  let measuredPreview: MeasuredPreviewManager | undefined
-  // Before auth and every API route: preview hosts can only serve measured files.
+  let staticPreview: StaticPreviewManager | undefined
+  // Before auth and every API route: preview hosts can only serve the opened static build.
   app.use('*', async (c, next) => {
-    const response = await measuredPreview?.handle(c.req.raw)
+    const response = await staticPreview?.handle(c.req.raw)
     if (response) return response
     await next()
   })
@@ -590,7 +593,7 @@ export function createAgentWorkflowApp(
   const proxyBillingRequest = (request: Request, path: string) =>
     proxyAuthenticatedBillingRequest(request, billingConfig, path, sessionAuth)
   const skillsConfig =
-    options.skillsConfig === false
+    options.skillsConfig === false || (!options.skillsConfig && localSingleProcess && !process.env.BEEGAME_SKILLS_API_BASE_URL)
       ? null
       : (options.skillsConfig ?? resolveBeeGameSkillsConfig())
   const proxySkillsRequest = skillsConfig
@@ -621,7 +624,7 @@ export function createAgentWorkflowApp(
     supabaseStore,
     supabaseRuntimeEnvClient,
     remoteUsageBilling,
-    skillsConfig: options.skillsConfig,
+    skillsConfig: skillsConfig ?? false,
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
     resolveRuntimeUser: async (userId, token) => {
@@ -654,12 +657,13 @@ export function createAgentWorkflowApp(
   const beeGameSessions = new BeeGameSessionManager(
     options.sessionRunner ?? createBgsRunner({outboundTargetPolicyOptions,resolveOutboundTarget}),
     dashboardDataRoot,
-    (userDataRoot, userId, authToken, modelConfigId) =>
-      dashboardRepository.getRuntimeEnv(
+    (userDataRoot, userId, authToken, modelConfigId, signal) =>
+      dashboardRepository.prepareAgentRuntimeEnv(
         userDataRoot,
         userId,
         authToken,
         modelConfigId,
+        signal,
       ),
     dashboardRepository.createSessionUsageBillingBackend(),
     Boolean(supabaseRuntimeEnvClient),
@@ -667,10 +671,10 @@ export function createAgentWorkflowApp(
   const v3ServiceKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
   const v3Url = process.env.BEEGAME_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim()
   const v3Store = options.workflowV3Store === false ? undefined : options.workflowV3Store ??
-    (supabaseStore && v3ServiceKey && v3Url ? createRemoteWorkflowStore({ url: v3Url, serviceKey: v3ServiceKey, fetchImpl: serviceFetch }) :
-      !supabaseStore && process.env.BEEGAME_WORKFLOW_V3_STORE === 'local-single-process' ? createLocalWorkflowStore(dashboardDataRoot) : undefined)
+    (localSingleProcess ? createLocalWorkflowStore(dashboardDataRoot) :
+      supabaseStore && v3ServiceKey && v3Url ? createRemoteWorkflowStore({ url: v3Url, serviceKey: v3ServiceKey, fetchImpl: serviceFetch }) : undefined)
   const previewStorage = createPreviewStorageStore(dashboardDataRoot)
-  measuredPreview = createMeasuredPreview({
+  staticPreview = createStaticPreview({
     origin: options.workflowV3PreviewOrigin ?? process.env.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN,
     capabilities: previewCapabilities,
     storage: previewStorage,
@@ -679,10 +683,24 @@ export function createAgentWorkflowApp(
       ? v3Store.readPreviewState(projectId, ownerId) : v3Store?.read(projectId, ownerId),
     isBusy: run => beeGameSessions.hasActiveProjectTurn(run.ownerId, run.projectId, run.workspacePath),
   })
-  options.registerCleanup?.(async () => { measuredPreview?.dispose(); previewStorage.close() })
+  options.registerCleanup?.(async () => { staticPreview?.dispose(); previewStorage.close() })
   registerV3DebugPage(app, process.env.BEEGAME_WORKFLOW_V3_DEBUG === '1')
   const v3Routes = registerV3Routes(app, {
     developmentPreview: () => beeGamePreviews,
+    stopDevelopmentPreview: async (request, user, projectId, workspacePath) => {
+      // A Run may use a different chat from the pre-existing user preview.
+      const previews = beeGameSessions.list(user.id)
+        .filter(session => beeGameSessions.metadata(session.id)?.projectId === projectId)
+        .map(session => beeGamePreviews.status(session.id, workspacePath))
+        .filter(preview => preview.status === 'running' || preview.status === 'starting')
+      const stopped = previews.map(preview => {
+        const snapshot = beeGamePreviews.stop(preview.sessionId, workspacePath)
+        previewCapabilities.revokeSession(preview.sessionId)
+        return snapshot
+      })
+      await Promise.all(stopped.map(snapshot => dashboardRepository.upsertPreviewSnapshot(
+        request, user, beeGameSessions.metadata(snapshot.sessionId), snapshot)))
+    },
     capturePublicationCover: options.publicationCoverCapture,
     capturePublicationCovers: options.publicationCoversCapture,
     deployment:()=>beeGameDeployments,
@@ -692,7 +710,7 @@ export function createAgentWorkflowApp(
     resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
     openAgentImage: value => {
       const personal = loadPersonalImageConnection(getUserDashboardDataRoot(dashboardDataRoot, value.user.id))
-      return openImageGenerationAccess({ userId: value.user.id, projectId: value.projectId,
+      return createImageGenerationAccess({ userId: value.user.id, projectId: value.projectId,
         workspacePath: value.workspacePath, service: imageGeneration, source: personal.source,
         screenOrientation: value.screenOrientation,
         reviewPrompt: async (prompt: string) => {
@@ -705,8 +723,6 @@ export function createAgentWorkflowApp(
             systemPrompt: IMAGE_PROMPT_REVIEW_INSTRUCTIONS,
             messages: [{ role: 'user', content: imagePromptReviewInput(
               value.workspacePath, value.confirmedRequirements, prompt, value.requireGdd) }],
-            structuredOutput: { name: 'image_prompt_review', description: 'Report concrete image-prompt conflicts or ambiguity',
-              inputSchema: z.toJSONSchema(imagePromptReviewSchema, { target: 'draft-7' }) },
             querySource: 'beegame_image_prompt_review',
           }, createUsageRecorder({ sessionId: value.sessionId, projectId: value.projectId,
             submit: record => beeGameSessions.recordExternalUsage(value.user.id, record) }), true,
@@ -718,7 +734,7 @@ export function createAgentWorkflowApp(
           () => loadRuntimeImageConfig(dashboardDataRoot, { remote: Boolean(supabaseStore), billing: billingConfig },
             (url, init) => serviceFetch(url, init)) })
     },
-    preview: measuredPreview,
+    preview: staticPreview,
     store: v3Store, sessions: beeGameSessions, getUser: getCurrentUser,
     getProject: (request, user, projectId) => getOwnedProjectMetadata(request, user, projectId, dashboardRepository),
     getAuthToken: getRequestAuthToken,
@@ -752,7 +768,7 @@ export function createAgentWorkflowApp(
     // Publication copy drafting reads owned documents and does not schedule project work.
     const isProjectDeletion = c.req.method === 'DELETE' && tail === ''
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !tail.startsWith('workflow-v3') &&
-        !isProjectDeletion && !(c.req.method === 'POST' && ['clone', 'publication-description'].includes(tail)) && tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
+        !isProjectDeletion && !(c.req.method === 'POST' && ['clone', 'publication-description'].includes(tail)) && tail !== 'session/ensure' && tail !== 'game-content/document' && !tail.startsWith('permissions/')) {
       try { await v3Routes.assertLegacy(c.req.param('id')!, getCurrentUser(c.req.raw).id, c.req.raw) }
       catch (error) {
         if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
@@ -2594,7 +2610,7 @@ export function createAgentWorkflowApp(
         previewCapabilities,
         dashboardRepository,
       })
-      const run = await v3Store?.read(projectId, user.id)
+      const run = await (v3Store?.readRuntimeState ? v3Store.readRuntimeState(projectId, user.id) : v3Store?.read(projectId, user.id))
       state.scene_ui_editor_available = false
       // Native events still describe the interrupted turn while the accepted
       // writer rebuilds its session/tools. Do not report that live work as idle.
@@ -2612,15 +2628,14 @@ export function createAgentWorkflowApp(
       state.execution_time = run && run.workspacePath === project.root_path
         ? projectExecutionTime(run, beeGameSessions.hasActiveProjectTurn(user.id, projectId, run.workspacePath)) ?? null
         : null
-      const candidatePreview = (await measuredPreview?.candidateStatus(projectId, user.id))?.preview
-      const activeV3Preview = candidatePreview ?? (await measuredPreview?.status(projectId, user.id))?.preview
-      if (activeV3Preview) {
+      const candidatePreview = (await staticPreview?.candidateStatus(projectId, user.id))?.preview
+      if (candidatePreview) {
         state.build_report = {
-          status: 'passed', entrypoint: 'index.html', report_path: '', build_url: activeV3Preview.url,
-          agents: [candidatePreview ? 'candidate-preview' : 'measured-preview'], generated_paths: [],
-          checks: [{ name: candidatePreview ? 'existing-static-build' : 'measured-build', status: 'passed',
-            detail: candidatePreview ? 'Serving the opened existing static build' : 'Serving the selected measured artifact', path: '' }],
-          summary: candidatePreview ? candidatePreview.limitations.join(' ') : 'Measured build Preview is available; game quality remains unverified.',
+          status: 'passed', entrypoint: 'index.html', report_path: '', build_url: candidatePreview.url,
+          agents: ['candidate-preview'], generated_paths: [],
+          checks: [{ name: 'existing-static-build', status: 'passed',
+            detail: 'Serving the opened existing static build', path: '' }],
+          summary: candidatePreview.limitations.join(' '),
           failure_reason: '', created_at: new Date().toISOString(),
         }
       }
@@ -2651,17 +2666,9 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
-    try {
-      const rawBody = await readJson(c.req.raw)
-      const v3Saved = await v3Routes.saveContent(c.req.raw, c.req.param('id'), rawBody)
-      if (!v3Saved)
-        return c.json({ error: 'Content editing requires a V3 project Run.', code: 'workflow-v3-required' }, 409)
-      c.header('Cache-Control', 'no-store')
-      return c.json(v3Saved)
-    } catch (err) {
-      if (err instanceof WorkflowError) return c.json({ error: err.message, code: err.code }, err.status)
-      return c.json({ error: toErrorMessage(err) }, 409)
-    }
+    const project = await dashboardRepository.getProject(c.req.raw, user, c.req.param('id'))
+    if (!project?.root_path) return c.json({error:'Owned project workspace not found',code:'project-not-found'},404)
+    return c.json({error:'BGS Scene/UI editing has been retired; use the selected engine sources',code:'editor-unavailable'},409)
   })
 
 
@@ -3493,7 +3500,9 @@ export function createAgentWorkflowApp(
             err instanceof HttpError
               ? getHttpErrorMessage(err.body)
               : toErrorMessage(err),
-          errorStatus: err instanceof HttpError ? err.status : 400,
+          errorStatus: err instanceof HttpError ? err.status : err instanceof BeeGameModelRuntimeError ? err.httpStatus ?? 502 : 400,
+          ...(err instanceof BeeGameModelRuntimeError ? { errorDetails: { diagnosticId: err.diagnosticId,
+            failureCode: err.failureCode, providerDiagnostics: err.providerDiagnostics } } : {}),
           updatedAt: Date.now(),
         })
         await persistIntakeJobSafely(jobDataRoot, jobId, intakeJobs.get(jobId)!)
@@ -3535,6 +3544,7 @@ export function createAgentWorkflowApp(
         status: job.status,
         error: job.error || 'Intake job failed',
         errorStatus: job.errorStatus ?? 400,
+        ...(job.errorDetails ? { errorDetails: job.errorDetails } : {}),
       })
     }
     return c.json({ status: job.status })
@@ -4898,16 +4908,18 @@ async function getBeeGameProjectRuntimeState(input: {
     const idle = createIdleProjectRuntimeState(input.project.id)
     return idle
   }
-  const events = await getProjectRuntimeEvents({
+  const facts = await getProjectRuntimeFacts({
     sessionId: sessionRef.sessionId,
     workspacePath: sessionRef.workspacePath,
     dashboardDataRoot: input.dashboardDataRoot,
     beeGameSessions: input.beeGameSessions,
   })
+  const { events } = facts
   const snapshot = getProjectRuntimeSnapshot({
     sessionId: sessionRef.sessionId,
     workspacePath: sessionRef.workspacePath,
     beeGameSessions: input.beeGameSessions,
+    recoveredEvents: facts.recoveredEvents,
   })
   const livePending = input.beeGameSessions.pendingPermissionsForProject(
     input.user.id,
@@ -4939,7 +4951,7 @@ async function getBeeGameProjectRuntimeState(input: {
     project_target: undefined,
   }))
   const acceptance = { status: 'not_run' }
-  const context = deriveBeeGameContextVisibility(events, snapshot) ?? {}
+  const context = deriveBeeGameContextVisibility(events, snapshot, facts.counters) ?? {}
   const runtimeFailureReason =
     runtime.agentStatus === 'failed'
       ? projectRuntimeDisplayReason(runtime.nextAction)
@@ -5102,34 +5114,24 @@ function projectWorkspaceMutationRouteError(
   return tracedRouteError(c, route, error)
 }
 
-async function getProjectRuntimeEvents(input: {
+async function getProjectRuntimeFacts(input: {
   sessionId: string
   workspacePath: string
   dashboardDataRoot?: string
   beeGameSessions: BeeGameSessionManager
-}): Promise<BeeGameEvent[]> {
-  let events: BeeGameEvent[]
+}): Promise<{events:BeeGameEvent[];counters:{eventCount:number;toolUseCount:number};recoveredEvents?:BeeGameEvent[]}> {
   try {
-    events = input.beeGameSessions.events(input.sessionId)
+    return input.beeGameSessions.runtimeStateFacts(input.sessionId)
   } catch (err) {
     if (toErrorMessage(err) !== 'Session not found') throw err
-    const transcript = await readSessionTranscriptFactsFromDisk(
-      input.sessionId,
-      input.workspacePath,
-    )
-    events = closeInterruptedTranscriptTurns(input.sessionId, transcript).map(
-      event =>
-        formatBeeGameEventForDisplay({
-          ...event,
-          sessionId: event.sessionId || input.sessionId,
-          createdAt: new Date(event.createdAt),
-        }),
-    )
+    // Share this exact disk observation with snapshot recovery below.
+    const transcript = await readSessionTranscriptFactsFromDisk(input.sessionId, input.workspacePath)
+    const recoveredEvents = transcript.map(event => ({...event,sessionId:event.sessionId || input.sessionId,createdAt:new Date(event.createdAt)}))
+    const events = closeInterruptedTranscriptTurns(input.sessionId, transcript)
+      .map(event => formatBeeGameEventForDisplay({...event,sessionId:event.sessionId || input.sessionId,createdAt:new Date(event.createdAt)}))
+      .sort((left,right)=>left.createdAt.getTime()-right.createdAt.getTime() || left.id-right.id)
+    return {events,recoveredEvents,counters:{eventCount:events.length,toolUseCount:events.filter(event=>event.type.startsWith('tool.')).length}}
   }
-  return events.sort((left, right) => {
-    const time = left.createdAt.getTime() - right.createdAt.getTime()
-    return time !== 0 ? time : left.id - right.id
-  })
 }
 
 const projectChatReads = new WeakMap<BeeGameSessionManager, Map<string, Promise<BeeGameEvent[]>>>()
@@ -5325,11 +5327,13 @@ function getProjectRuntimeSnapshot(input: {
   sessionId: string
   workspacePath: string
   beeGameSessions: BeeGameSessionManager
+  recoveredEvents?: BeeGameEvent[]
 }): BeeGameRuntimeSnapshot | undefined {
   try {
     return input.beeGameSessions.runtimeSnapshot(
       input.sessionId,
       input.workspacePath,
+      input.recoveredEvents,
     )
   } catch {
     return undefined
@@ -5653,12 +5657,12 @@ function getActiveBeeGameTurn(events: BeeGameEvent[]): string {
 function deriveBeeGameContextVisibility(
   events: BeeGameEvent[],
   snapshot?: BeeGameRuntimeSnapshot,
+  counters = {eventCount:events.length,toolUseCount:events.filter(event=>event.type.startsWith('tool.')).length},
 ): JsonObject | null {
   const eventUsage = getLatestRuntimeUsage(events)
   const usage = eventUsage.total_tokens > 0 ? eventUsage : snapshot?.usage
   if (!usage) return null
   // Compatibility counter: counts tool.* lifecycle events, not tool calls.
-  const toolLifecycleEventCount = events.filter(event => event.type.startsWith('tool.')).length
   // A missing snapshot is not evidence that the coordinator consumed every token.
   const roleTokens = snapshot?.roleTokens ?? deriveObservedRoleTokens(events, usage)
   return {
@@ -5666,7 +5670,7 @@ function deriveBeeGameContextVisibility(
     phase: snapshot?.phaseName || 'idle',
     status: 'active',
     summary: 'BeeGame runtime observability is active for this session.',
-    blackboard_record_count: events.length,
+    blackboard_record_count: counters.eventCount,
     rag_sources: [],
     selected_skills: [],
     runtime_features: [],
@@ -5685,10 +5689,7 @@ function deriveBeeGameContextVisibility(
       total_tokens: usage.total_tokens,
       role_tokens: roleTokens,
     },
-    counters: {
-      eventCount: events.length,
-      toolUseCount: toolLifecycleEventCount,
-    },
+    counters,
   }
 }
 
@@ -6550,8 +6551,8 @@ function buildConfirmedBrief(
     agent_response_language: agentResponseLanguage,
     idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
     default_first_release_scope: {
-      target: 'playable MVP for first user playtesting',
-      content: 'a usable core loop with representative content and the controls, visual treatment and feedback needed to judge it; explicit user requirements remain in scope',
+      target: 'a small-scope game with a complete core experience',
+      content: 'a coherent playable core loop with representative content, responsive controls and integrated visual and sensory feedback appropriate to the game; explicit user requirements remain in scope',
       defer: 'unrequested content expansion and nonessential product features',
     },
     selected_option: toCanonicalConfirmedOption(brief.option),

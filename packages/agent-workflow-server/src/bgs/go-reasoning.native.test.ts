@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -11,7 +12,8 @@ const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 // All upstream requests are intercepted in memory. Unmatched requests cannot
 // reach the network; the real native CLI talks only to its localhost bridge.
 nativeTest('Go effort reaches the converted request and default clears a cold-resumed override', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-go-reasoning-native-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-go-reasoning-native-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game)
   await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
@@ -26,7 +28,7 @@ nativeTest('Go effort reaches the converted request and default clears a cold-re
     ].map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('')
   }, { headers: { 'content-type': 'text/event-stream' } }).times(4)
   setGlobalDispatcher(mock)
-  const env = { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+  const env = { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
     BEEGAME_MODEL_TYPE: 'openai', BEEGAME_API_PROTOCOL: 'chat-completions', OPENAI_API_KEY: 'offline-fixture-only',
     OPENAI_BASE_URL: 'https://opencode.ai/zen/go/v1', BEEGAME_MODEL: 'deepseek-v4.1-flash' }
   const runner = createBgsRunner({ command: [await realpath(bgsCommand()[0]!)], resolveOutboundTarget: async value => {

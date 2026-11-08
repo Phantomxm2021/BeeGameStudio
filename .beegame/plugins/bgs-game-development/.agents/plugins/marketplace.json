@@ -1,0 +1,17 @@
+{
+  "name": "bgs-professional",
+  "plugins": [
+    {
+      "name": "bgs-game-development",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from '../bgs/fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,7 +10,8 @@ const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 // scripted. The resumed response includes the old assistant's private carrier
 // in its reported prompt usage; counting that carrier again crosses the limit.
 nativeTest.each([220_000, 250_000])('converted history uses provider context usage once and still compacts above the limit: %s', async promptTokens => {
-  const root = await mkdtemp('/private/tmp/bgs-context-accounting-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-context-accounting-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game)
   await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
@@ -64,7 +66,7 @@ nativeTest.each([220_000, 250_000])('converted history uses provider context usa
       let turnPrompt = 0, turnOutput = 0
       runtime = await runner.start({ sessionId: 'context-accounting-fixture', cwd: game,
         ...(resume ? { resumeSessionId: nativeSessionId } : {}),
-        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           BEEGAME_API_PROTOCOL: 'chat-completions', OPENAI_API_KEY: 'fixture-only',
           OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
         onNativeSessionId: id => { nativeSessionId = id },

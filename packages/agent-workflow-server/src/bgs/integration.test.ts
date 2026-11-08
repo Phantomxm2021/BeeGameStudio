@@ -1,6 +1,7 @@
-import { resolve } from 'node:path'
+import { writeFixturePlugin } from './fixtures/plugin'
+import { dirname, resolve } from 'node:path'
 import { expect, test } from 'bun:test'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createBgsRunner } from './runner'
 import { BEEGAME_USER_RESPONSE_SCOPE } from '../beegame/user-response-scope'
@@ -13,7 +14,8 @@ const sandboxTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 sandboxTest('pinned Bgs completes a real app-server turn against a local Responses fixture', async () => {
   const root = await mkdtemp('/private/tmp/bgs-bgs-real-'), game = join(root, 'game')
   await mkdir(game)
-  const catalog = join(root,'catalog'),skill = join(catalog,'synthetic')
+  const catalog = join(root, 'plugin-source', 'bgs-game-skills'),skill = join(catalog,'synthetic')
+  await mkdir(catalog,{recursive:true})
   await mkdir(skill,{recursive:true})
   await writeFile(join(skill,'SKILL.md'),'---\nname: bgs-synthetic-skill\ndescription: Local fixture skill.\n---\nSYNTHETIC_SKILL_BODY_MARKER\n')
   const requests: string[] = [], events: any[] = [], usage: any[] = [], toolCatalogs: string[] = []
@@ -37,6 +39,8 @@ sandboxTest('pinned Bgs completes a real app-server turn against a local Respons
     const developerText = body.input.filter((item: any) => item.role === 'developer')
       .flatMap((item: any) => item.content ?? []).map((part: any) => part.text ?? '').join('\n')
     expect(developerText).toContain(BEEGAME_USER_RESPONSE_SCOPE)
+    expect(developerText).toContain('bgs-unavailable: dns_unresolved')
+    expect(JSON.stringify(body)).not.toContain('key=must-not-leak')
     const message = { id: 'msg_fixture', type: 'message', role: 'assistant', status: 'completed',
       content: [{ type: 'output_text', text: 'Local fixture completed', annotations: [] }] }
     const response = { id: 'resp_fixture', object: 'response', created_at: 1, model: body.model, status: 'completed', output: [message],
@@ -55,12 +59,19 @@ sandboxTest('pinned Bgs completes a real app-server turn against a local Respons
   } })
   let runtime
   try {
-    runtime = await createBgsRunner({resolveOutboundTarget: async value => ({url:new URL(value),addresses:['127.0.0.1'],
-      lookup:(_host,_options,callback)=>callback(null,'127.0.0.1',4)})}).start({ sessionId: 'offline', cwd: game,
-      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:catalog, OPENAI_API_KEY: 'synthetic-local-key',
+    const target = async (value: string) => {
+      const url = new URL(value)
+      if (url.origin !== server.url.origin) throw Error('External fixture request forbidden')
+      return {url,addresses:['127.0.0.1'],lookup:(_host:any,_options:any,callback:any)=>callback(null,'127.0.0.1',4)}
+    }
+    runtime = await createBgsRunner({resolveOutboundTarget: target,
+      inspectOutboundTarget: async value => new URL(value).hostname === 'unresolved.invalid'
+        ? {approved:false,code:'dns_unresolved'} : {approved:true,target:await target(value)}}).start({ sessionId: 'offline', cwd: game,
+      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:await writeFixturePlugin(catalog), OPENAI_API_KEY: 'synthetic-local-key',
         OPENAI_BASE_URL: server.url.toString().replace(/\/$/, '') + '/v1', BEEGAME_MODEL: 'fixture-model',
         BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify([{id:'fixture',enabled:true,autoStart:true,scope:'global',transport:'stdio',command:process.execPath,args:['-e',mcpCode],env:[{key:'MCP_FIXTURE_TOKEN',value:'synthetic-mcp-secret'}]},
-          {id:'http-fixture',enabled:true,autoStart:true,scope:'global',transport:'http',url:server.url.origin+'/mcp'}]) },
+          {id:'http-fixture',enabled:true,autoStart:true,scope:'global',transport:'http',url:server.url.origin+'/mcp'},
+          {id:'unavailable',enabled:true,autoStart:true,scope:'global',transport:'http',url:'https://unresolved.invalid/mcp?key=must-not-leak'}]) },
       onNativeUsage: value => { usage.push(value) }, requestPermission: async () => ({ behavior: 'deny' }) })
     await runtime.submit({ prompt: '$bgs-synthetic-skill Return the fixture answer', signal: AbortSignal.timeout(15_000),
       onMessage: message => { events.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
@@ -93,23 +104,32 @@ sandboxTest('Bgs sandbox enforces protected writes and external reads against re
 sandboxTest('catalog-advertised skill paths are readable in the sandbox while credentials and skill writes stay denied', async () => {
   const { BgsClient } = await import('./client')
   const { configureBgsSkills } = await import('./skills')
-  const root = await mkdtemp('/private/tmp/bgs-bgs-skills-'), builtins=join(root,'catalog'), home=join(root,'home')
+  const root = await mkdtemp('/private/tmp/bgs-bgs-skills-'), builtins=join(root,'plugin-source','bgs-game-skills'), home=join(root,'home')
   const skill = join(builtins,'synthetic-skill')
   await mkdir(skill,{recursive:true})
   await writeFile(join(skill,'SKILL.md'),'---\nname: bgs-synthetic-skill\ndescription: Synthetic skill for offline catalog verification.\n---\nSynthetic instructions.\n')
   let client
   try {
     await mkdir(home,{recursive:true})
+    await writeFixturePlugin(builtins)
     client = await BgsClient.connect({cwd:root,env:{PATH:process.env.PATH!,HOME:home,BGS_HOME:home},config:{cli_auth_credentials_store:'file'}})
-    await configureBgsSkills(client,home,builtins,join(root,'user-skills'))
+    await configureBgsSkills(client,home,builtins)
+    const nativeConfig=await readFile(join(home,'config.toml'),'utf8')
+    const relocated=join(root,'plugin-source','bgs-game-development')
+    await rename(builtins,relocated)
+    await symlink('bgs-game-development',builtins)
+    const {readRoots}=await configureBgsSkills(client,home,relocated)
+    expect(await readFile(join(home,'config.toml'),'utf8')).toBe(nativeConfig)
+    expect(readRoots).not.toContain(builtins)
     const result = await client.request('skills/list',{cwds:[root],forceReload:true})
     expect(result.data.flatMap((entry:any)=>entry.errors)).toEqual([])
-    const advertised = result.data.flatMap((entry:any)=>entry.skills).find((entry:any)=>entry.name==='bgs-synthetic-skill')
-    expect(advertised?.path).toBe(join(skill,'SKILL.md'))
+    const advertised = result.data.flatMap((entry:any)=>entry.skills).find((entry:any)=>entry.name==='bgs-game-development:bgs-synthetic-skill')
+    expect(advertised?.path.startsWith(home+'/plugins/cache/')).toBe(true)
     const game=join(root,'game'), credentials=join(home,'auth.json'), otherUserSkill=join(root,'other-user-skill.md')
     await mkdir(game); await writeFile(credentials,'synthetic-secret'); await writeFile(otherUserSkill,'Other user private skill')
     const filesystem: Record<string,string> = { ':root':'deny', ':minimal':'read', ':slash_tmp':'deny',
-      [game]:'write', [builtins]:'read', [join(home,'skills')]:'read', [process.execPath]:'read' }
+      [game]:'write', [relocated]:'read', [join(home,'skills')]:'read', [process.execPath]:'read',
+      ...Object.fromEntries(readRoots.map(path=>[path,'read'])) }
     const run = async (script:string) => {
       const child=Bun.spawn(bgsCommand().concat('sandbox','-C',game,'-P','bgs-test','-c',
         'permissions.bgs-test='+toml({filesystem,network:{enabled:false}}),'--',process.execPath,'-e',script),
@@ -118,12 +138,12 @@ sandboxTest('catalog-advertised skill paths are readable in the sandbox while cr
       return {code,output,errors}
     }
     expect((await readdir(join(home,'skills'))).some(name=>name.startsWith('bgs-builtin-'))).toBe(false)
-    const escape=join(home,'skills','credential-alias')
+    const escape=join(dirname(advertised.path),'credential-alias')
     await symlink(credentials,escape)
     const read=`const fs=require('node:fs');console.log(fs.readFileSync(${JSON.stringify(advertised.path)},'utf8'))`
     const script=read+`;let denied=0;for(const action of [()=>fs.readFileSync(${JSON.stringify(credentials)}),()=>fs.writeFileSync(${JSON.stringify(advertised.path)},'bad'),()=>fs.readFileSync(${JSON.stringify(escape)}),()=>fs.readFileSync(${JSON.stringify(otherUserSkill)})]){try{action()}catch{denied++}}console.log(JSON.stringify({denied}));if(denied!==4)process.exit(2)`
     expect(await run(script)).toMatchObject({code:0,output:expect.stringContaining('"denied":4')})
-    expect(await readFile(join(skill,'SKILL.md'),'utf8')).toContain('Synthetic instructions.')
+    expect(await readFile(advertised.path,'utf8')).toContain('Synthetic instructions.')
     expect(await readFile(credentials,'utf8')).toBe('synthetic-secret')
   } finally {await client?.close();await rm(root,{recursive:true,force:true})}
 },15000)
@@ -204,3 +224,50 @@ sandboxTest('managed registration writes through the host while native registry 
     expect((await run([cli, 'registration.json'])).code).toBe(1)
   } finally { await tools?.close(); await access?.close(); await rm(root, { recursive: true, force: true }) }
 }, 30_000)
+
+
+sandboxTest('native default-mode questions reach the existing BGS answer path without a custom question tool',async()=>{
+  const root=await mkdtemp('/private/tmp/bgs-native-question-'),game=join(root,'game')
+  await mkdir(game)
+  const requests:any[]=[],events:any[]=[],questions:any[]=[]
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET')return new Response(null,{status:404})
+    const body=await request.json() as any;requests.push(body)
+    if(requests.length>2)return new Response('Unexpected extra model request',{status:500})
+    const asking=requests.length===1
+    const args=JSON.stringify({questions:[{id:'choice',header:'Choice',question:'Choose one',options:[
+      {label:'A',description:'First choice'},{label:'B',description:'Second choice'}]}]})
+    const item=asking?{id:'native_question',type:'function_call',call_id:'native_question_call',name:'request_user_input',arguments:args,status:'completed'}
+      :{id:'native_answer',type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'Answered locally',annotations:[]}]}
+    const response={id:'local_question_'+requests.length,object:'response',created_at:1,model:body.model,status:'completed',output:[item],
+      usage:{input_tokens:100,output_tokens:20,total_tokens:120,input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:0}}}
+    const stream=[{type:'response.created',response:{...response,status:'in_progress',output:[]}},
+      {type:'response.output_item.added',output_index:0,item:asking?{...item,arguments:''}:{...item,content:[]}},
+      ...(asking?[{type:'response.function_call_arguments.delta',item_id:item.id,output_index:0,delta:args},
+        {type:'response.function_call_arguments.done',item_id:item.id,output_index:0,arguments:args}]:[
+        {type:'response.content_part.added',item_id:item.id,output_index:0,content_index:0,part:{type:'output_text',text:'',annotations:[]}},
+        {type:'response.output_text.delta',item_id:item.id,output_index:0,content_index:0,delta:'Answered locally'},
+        {type:'response.output_text.done',item_id:item.id,output_index:0,content_index:0,text:'Answered locally'},
+      ]),{type:'response.output_item.done',output_index:0,item},{type:'response.completed',response}]
+      .map((event,sequence_number)=>`event: ${event.type}\ndata: ${JSON.stringify({...event,sequence_number})}\n\n`).join('')
+    return new Response(stream,{headers:{'Content-Type':'text/event-stream'}})
+  }})
+  let runtime
+  try {
+    runtime=await createBgsRunner({resolveOutboundTarget:async(value:string)=>{
+      const url=new URL(value);if(url.origin!==server.url.origin)throw Error('External request forbidden')
+      return {url,addresses:['127.0.0.1'],lookup:(_host:any,_options:any,callback:any)=>callback(null,'127.0.0.1',4)}
+    }}).start({sessionId:'native-question',cwd:game,env:{BEEGAME_CONFIG_DIR:join(root,'config'),OPENAI_API_KEY:'local-fixture',BEEGAME_MODEL:'fixture-model',OPENAI_BASE_URL:server.url.origin+'/v1'},
+      requestPermission:async request=>{questions.push(request);return {behavior:'allow',source:'policy',updatedInput:{...request.input,answers:{'Choose one':'A'}}}}})
+    await runtime.submit({prompt:'Ask the local fixture question',signal:new AbortController().signal,onMessage:message=>{events.push(message)},requestPermission:async()=>({behavior:'deny'})})
+    expect(requests).toHaveLength(2)
+    expect(JSON.stringify(requests[0].tools)).toContain('request_user_input')
+    expect(JSON.stringify(requests[0].tools)).not.toContain('AskUserQuestion')
+    expect(JSON.stringify(requests[0].tools)).not.toContain('WriteProjectFile')
+    expect(questions).toHaveLength(1)
+    expect(questions[0]).toMatchObject({toolName:'AskUserQuestion',input:{questions:[{question:'Choose one'}]}})
+    const output=requests[1].input.find((item:any)=>item.type==='function_call_output'&&item.call_id==='native_question_call')
+    expect(JSON.parse(output.output)).toMatchObject({answers:{choice:{answers:['A']}}})
+    expect(events.filter(item=>item.eventType?.startsWith('assistant.')).map(item=>item.text).join('')).toContain('Answered locally')
+  }finally{await runtime?.dispose?.();server.stop(true);await rm(root,{recursive:true,force:true})}
+},30000)

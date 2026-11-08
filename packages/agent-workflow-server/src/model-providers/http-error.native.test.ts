@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from '../bgs/fixtures/plugin'
 import { expect, spyOn, test } from 'bun:test'
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -13,7 +14,8 @@ nativeTest.each([
   { name: 'Go top-level quota', code: undefined, body: { type: 'GoUsageLimitError', message: 'Weekly usage limit reached. PRIVATE_PROVIDER_BODY' }, expected: { type: 'GoUsageLimitError', messageReason: 'weekly_usage_limit' } },
   { name: 'message-only upstream rate', code: undefined, body: { error: { message: 'Upstream request failed: [rate_limit_exceeded] Rate limit exceeded. PRIVATE_PROVIDER_BODY' } }, expected: { messageCode: 'rate_limit_exceeded', messageReason: 'rate_limit' } },
 ])('converted HTTP 429 preserves native failure and diagnostics for $name without retries', async ({ code, body, expected }) => {
-  const root = await mkdtemp('/private/tmp/bgs-http-error-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-http-error-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game)
   await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
@@ -35,7 +37,7 @@ nativeTest.each([
   let runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
     runtime = await runner.start({ sessionId: 'http-error-fixture', cwd: game,
-      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
         BEEGAME_API_PROTOCOL: 'chat-completions', OPENAI_API_KEY: 'fixture-only',
         OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
       requestPermission: async () => ({ behavior: 'deny' }),

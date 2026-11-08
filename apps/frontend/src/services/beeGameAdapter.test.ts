@@ -1308,3 +1308,16 @@ it('submits PNG and atlas JSON together through the existing upload endpoint wit
   expect(url).toBe('/api/projects/project/assets/resources/new/upload');
   expect((options?.body as FormData).getAll('file')).toEqual(files);
 });
+
+
+it('preserves a terminal intake failure status and details without retrying the model job', async () => {
+  authenticatedFetchMock.mockReset()
+  const details = {diagnosticId:'worker-id',failureCode:'upstream-http-error',
+    providerDiagnostics:{bodyStatus:'parsed',code:'inference_failed',requestId:'01a1aff8-b9b5-7b65-98c3-87411d962d3e'}}
+  authenticatedFetchMock.mockResolvedValueOnce(Response.json({jobId:'intake_failed',status:'running'}))
+    .mockResolvedValueOnce(Response.json({status:'failed',error:'Provider rejected (HTTP 429)',errorStatus:429,errorDetails:details}))
+  await expect(beeGameAdapter.runIdeaIntake({idea:'接苹果',language:'zh'}))
+    .rejects.toMatchObject({message:'Provider rejected (HTTP 429)',status:429,details})
+  expect(authenticatedFetchMock.mock.calls.map(([url])=>url)).toEqual([
+    '/api/beegame-intake/jobs','/api/beegame-intake/jobs/intake_failed'])
+})

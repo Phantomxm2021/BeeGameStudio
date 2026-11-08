@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 
@@ -18,7 +18,13 @@ describe('Docker runtime permissions', () => {
     )
 
     expect(dockerfile).toContain('su-exec')
-    expect(dockerfile).toContain('COPY .beegame/skills/bgs-game-skills ./.beegame/skills/bgs-game-skills')
+    expect(dockerfile).toContain('COPY .beegame/plugins/bgs-game-development ./.beegame/plugins/bgs-game-development')
+    expect(dockerfile).not.toContain('.beegame/skills')
+    expect(existsSync(join(repoRoot, '.beegame/plugins/bgs-game-development/.codex-plugin/plugin.json'))).toBe(true)
+    expect(existsSync(join(repoRoot, '.beegame/skills/bgs-game-skills'))).toBe(false)
+    const workflow = readRepoFile('.github/workflows/backend-checks.yml')
+    expect(workflow.match(/'\.beegame\/plugins\/\*\*'/g)).toHaveLength(2)
+    expect(workflow).not.toContain('.beegame/skills/')
     expect(runtimeTarget).not.toContain('\nUSER bun\n')
     expect(entrypoint).toContain('runtime_user="${BEEGAME_RUNTIME_USER:-bun}"')
     expect(entrypoint).toContain('runtime_group="${BEEGAME_RUNTIME_GROUP:-bun}"')

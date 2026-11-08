@@ -1,0 +1,75 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>platformer observation fixture</title>
+<style>body{font:16px system-ui;background:#14202c;color:#f4eee1;margin:12px}canvas{background:#20374a;display:block;border:2px solid #aab9b6}h1{font-size:24px;margin:8px 0}button{font:inherit;padding:8px;margin:4px;border-radius:8px}p{max-width:680px;margin:8px 0}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff0cc;color:#41352e;font:16px/1.4 system-ui}
+body>h1,body>p{display:none}#review{width:min(96vw,1000px,calc((100vh - 180px)*16/9))}
+#head{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:72px}#brand{font-size:19px;font-weight:800;letter-spacing:.04em}
+#task{font-size:14px}#status{margin:0;font-size:16px;font-weight:650}#world{position:relative;background:#ccdaca;isolation:isolate;overflow:hidden;border-radius:24px}
+canvas{width:100%;height:auto;display:block;border:0;background:#ccdaca}#foot{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:72px}#hint{font-size:14px;max-width:36em}
+#controls{display:flex;flex-wrap:wrap;justify-content:flex-end}button{font:650 16px/1.2 system-ui;margin:0;padding:12px 18px;border:1px solid currentColor;border-radius:24px;color:inherit;background:transparent;cursor:pointer}
+button:focus-visible{outline:3px solid #763e33;outline-offset:3px}button:active{filter:brightness(.85)}#controls button{font-size:14px;padding:9px;margin:3px}
+.screen{position:absolute;inset:0;display:grid;align-items:center;justify-items:start;padding:clamp(14px,4vw,48px);background:linear-gradient(90deg,#fff0ccf5,#fff0ccb0 58%,transparent)}
+.card{max-width:440px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.18em;text-transform:uppercase;color:#763e33}h2{font:800 clamp(28px,5.5vw,66px)/1 system-ui;letter-spacing:-.05em;margin:16px 0}p.copy{margin:12px 0 24px;max-width:28em;font-size:clamp(14px,2vw,20px)}
+.primary{background:#763e33;color:#fff0cc;border-color:#763e33}[hidden]{display:none!important}
+body[data-game=puzzle] h2{font-weight:400;letter-spacing:.03em}body[data-game=puzzle] .screen{background:#fff0ccd9}
+body[data-game=puzzle] #result-screen{inset:auto 0 0 0;padding:14px 18px;background:#fff0ccf5}body[data-game=puzzle] #result-screen .card{max-width:none;width:100%;display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:12px}body[data-game=puzzle] #result-screen .eyebrow,body[data-game=puzzle] #result-screen h2,body[data-game=puzzle] #result-screen .copy{grid-column:1}body[data-game=puzzle] #result-screen h2{font-size:clamp(22px,3vw,38px);margin:4px 0}body[data-game=puzzle] #result-screen .copy{font-size:14px;margin:4px 0}body[data-game=puzzle] #result-screen button{grid-column:2;grid-row:1/4}
+body[data-game=arena] h2{text-transform:uppercase;font-style:italic}body[data-game=arena] #status{font-variant-numeric:tabular-nums;border-left:4px solid #763e33;padding-left:10px}
+@media(max-width:600px){#review{width:96vw}#head{min-height:92px;flex-wrap:wrap;gap:6px}#brand{width:65%}#task{font-size:12px}#status{font-size:14px}#foot{align-items:flex-start;flex-direction:column}#hint{font-size:12px}.screen{padding:16px}p.copy{margin:8px 0 12px}h2{margin:8px 0}}
+</style>
+<h1>platformer — synthetic gameplay fixture</h1><p>Arrow keys move; Space jumps. Cross the gap and reach the flag. Falling loses; restart tries again.</p><div id="controls"></div>
+<canvas width="640" height="360" aria-label="Game field"></canvas><p role="status" id="status"></p>
+<script>
+const ctx=document.querySelector('canvas').getContext('2d'),status=document.querySelector('#status'),keys={};let state='Ready',text='';
+function log(event,value){console.log('game-event',JSON.stringify({event,value,state,at:performance.now()}));}
+function button(name,action){const b=document.createElement('button');b.textContent=name;b.onclick=action;document.querySelector('#controls').append(b);return b;}
+addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Space'].includes(e.code)){e.preventDefault();keys[e.code]=true;log('key-down',e.code);}});
+addEventListener('keyup',e=>{keys[e.code]=false;log('key-up',e.code);});
+button('Start',()=>{state='Playing';reset();log('start');});button('Restart',()=>{for(const key in keys)delete keys[key];reset();state='Playing';log('restart');});
+
+let x=50,y=290,vy=0,grounded=true;
+function reset(){x=50;y=290;vy=0;grounded=true;}
+function step(dt){
+ const oldY=y;x+=((keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0))*200*dt;
+ if(keys.Space&&grounded){vy=-480;grounded=false;log('jump');}vy+=1000*dt;y+=vy*dt;
+ const floor=x<240||x>380;if(floor&&oldY<=290&&y>=290&&vy>0){y=290;vy=0;grounded=true;}
+ if(!floor)grounded=false;if(y>380){state='Lost';log('fall');}if(x>580&&y<=290){state='Won';log('goal');}
+ ctx.fillStyle='#546d83';ctx.fillRect(0,320,240,40);ctx.fillRect(380,320,260,40);
+ ctx.fillStyle='#e3b43b';ctx.fillRect(590,220,6,100);ctx.fillRect(596,220,30,20);
+ ctx.fillStyle='#b94859';ctx.fillRect(x-12,y,24,30);text=grounded?'Grounded':'Airborne';
+}
+let last=performance.now();function frame(now){const dt=Math.min((now-last)/1000,.04);last=now;if(state==='Playing'){ctx.clearRect(0,0,640,360);step(dt);}status.textContent=state+' — '+text;requestAnimationFrame(frame);}requestAnimationFrame(frame);
+</script><script>
+document.body.dataset.game="platformer";
+document.body.insertAdjacentHTML('afterbegin',`<main id="review"><header id="head"><div><div id="brand">Little Leap</div><div id="task">Reach the flag</div></div><div id="readout"></div><button id="pause">Pause</button></header><div id="world"></div><footer id="foot"><span id="hint">Arrows move · Space jumps</span></footer></main>`);
+const world=document.querySelector('#world');world.append(document.querySelector('canvas'));
+document.querySelector('#readout').append(status);document.querySelector('#foot').append(document.querySelector('#controls'));
+world.insertAdjacentHTML('beforeend',`<section class="screen" id="title-screen"><div class="card"><div class="eyebrow">A short adventure</div><h2>Little Leap</h2><p class="copy">One little leap. A whole new shore.</p></div></section><section class="screen" id="pause-screen" hidden><div class="card"><div class="eyebrow">Take your time</div><h2>Paused</h2><p class="copy">Your place is safe.</p><button id="resume" class="primary">Resume</button></div></section><section class="screen" id="result-screen" hidden><div class="card"><div class="eyebrow">Round complete</div><h2 id="outcome"></h2><p class="copy" id="outcome-copy"></p></div></section>`);
+const startButton=[...document.querySelectorAll('button')].find(b=>b.textContent==='Start');startButton.textContent='Begin';startButton.className='primary';document.querySelector('#title-screen .card').append(startButton);
+const retryButton=[...document.querySelectorAll('button')].find(b=>b.textContent==='Restart');retryButton.textContent='Try again';retryButton.className='primary';document.querySelector('#result-screen .card').append(retryButton);
+const pauseButton=document.querySelector('#pause'),resumeButton=document.querySelector('#resume');
+function clearInput(){for(const k in keys)delete keys[k];}
+function pausePlay(){if(state==='Playing'){state='Paused';clearInput();log('pause');syncUi();}}
+function resumePlay(){if(state==='Paused'){state='Playing';clearInput();log('resume');syncUi();}}
+pauseButton.onclick=pausePlay;resumeButton.onclick=resumePlay;
+addEventListener('keydown',e=>{if(e.code==='Escape'){e.preventDefault();state==='Playing'?pausePlay():resumePlay();}if(state!=='Playing'&&['ArrowLeft','ArrowRight','Space'].includes(e.code))e.stopImmediatePropagation();},true);
+addEventListener('blur',clearInput);
+let shown='',arrival;
+function syncUi(){
+ if(shown===state)return;shown=state;clearInput();if(arrival)arrival.cancel();
+ for(const [id,visible] of [['title-screen',state==='Ready'],['pause-screen',state==='Paused'],['result-screen',state==='Won'||state==='Lost']])document.getElementById(id).hidden=!visible;
+ pauseButton.hidden=state!=='Playing';document.querySelector('#controls').hidden=state!=='Playing';
+ document.querySelector('#outcome').textContent=state==='Won'?'The next shore is yours.':'Try a new approach';
+ document.querySelector('#outcome-copy').textContent=state==='Won'?'Reach the flag — complete.':text;
+ const control=state==='Ready'?startButton:state==='Paused'?resumeButton:state==='Playing'?pauseButton:retryButton;control.focus({preventScroll:true});
+ const panel=document.querySelector('.screen:not([hidden]) h2');
+ const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ if(panel&&!reduced){
+  const from="platformer"==='puzzle'?{opacity:.45}:{opacity:.45,transform:'translateY(6px) scale(.98)'};
+  arrival=panel.animate([from,{opacity:1,transform:'none'}],{duration:220,easing:'cubic-bezier(.2,.8,.2,1)'});
+  /* finish is presentation only */
+ }
+ log('ui-state',{state,reduced,focus:document.activeElement.textContent});
+}
+// Draw the initial world with the actual simulation renderer, without advancing it.
+reset();step(0);syncUi();
+function uiFrame(){syncUi();requestAnimationFrame(uiFrame);}requestAnimationFrame(uiFrame);
+</script></html>

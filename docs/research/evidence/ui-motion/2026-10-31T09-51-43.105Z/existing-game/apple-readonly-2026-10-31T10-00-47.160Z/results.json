@@ -1,0 +1,100 @@
+{
+  "status": "failed",
+  "error": "Error: Expected UI not reached: !!document.querySelector('.pause-layer')",
+  "sourceBefore": {
+    "index.html": "be4dc2cfeaf1f8b37db17768b91097bd32bc8d407432364e89e9ba2f681b0c23",
+    "assets/apples-CX4ZV6Hg.png": "c48909db4a2f5df222faa110e55d97f285b7818f902fea20473544b00e80807a",
+    "assets/catch-07-DUAhuqKH.wav": "520fe545c9b37861d976b8557b3788965ab9fd9380ec16cf8c98f96f9ca7a228",
+    "assets/feedback.atlas-D6rXBmGl.json": "ebe79bb98a56cf57d89b5fe07de9e8a1e59284bf31a7ae0f322194814b879a70",
+    "assets/index-kSyMvxHt.css": "fd70c4b14f393eba5703b62819fa9b7f9f010f0902926355d0904949b5cf9ad8",
+    "assets/catch-09-DUTC9O2i.wav": "7788ba987b69c94f3ba24061d2730cdce5b129ac14a029978adce4b42499a702",
+    "assets/music-theme-DEFR5fGd.wav": "3f75a6fd430977ca8c2f90f0ae2e094fe78a509c6c431d1909b64327d3f19f57",
+    "assets/catch-01-B8dNW9eY.wav": "e02165d1b2f3cb24720289316840a045b86cc1d89f9679ae3415415197696e5a",
+    "assets/miss-CnlqvdBg.wav": "02f383b56508f242fad1b5e81945871aa97d15d3e62c427d8674113c74d3aa8b",
+    "assets/ui-click-CkZgtdnv.wav": "35eca3cd62df887697ccbec7194376e2b5a2faa1ee146dacee640cbb488cb6af",
+    "assets/feedback-C0x0vrTJ.png": "54a530966c4e1d307baa1b784decfe40022fac51221fec1a8be14a7ac8140d35",
+    "assets/zcool-kuaile-game-DnjX8NZd.woff2": "29bbd5b1422242d14660b6a7e3835414adfd53a75dbabb2088d2ae29dba2e542",
+    "assets/catch-06-BzCx4lZX.wav": "7688a41c176948d0c5c02968d56dec385e6cff87583ef14d78537a51aa359246",
+    "assets/catch-08-K4KmgQix.wav": "bc625261041dd9ea617c1faf35bfa43eb16adbcfb54d3f6e00437d55eeb83635",
+    "assets/failure-rwyfGNgT.wav": "35cc765ea53f8f80840610d09fa35b80cafb2b07346c61890143931941107ad1",
+    "assets/baskets.atlas-BOLmFQqb.json": "8ec94123189c3026df012afb84c040b9fe1d3ac33c5ff89e84175989b539c4cd",
+    "assets/catch-02-5y5TFcKz.wav": "237b8a79788dddb72895f5ebcb999c8a5a714c19648cfa863a722867f0be77f8",
+    "assets/victory-ByMtsyUr.wav": "5c31c305708ba4dd18bb39604b0ddd0c3e325c87770863fde1ac79310417d102",
+    "assets/catch-05-CVcNSzHs.wav": "c20161dee2cfb6afc99a99a325710fb472a455d6e6a08abec61205f42dc251d6",
+    "assets/ui-toggle-Q57yqO3e.wav": "0fe1ed7d0a65eb1aaa2e42678e0c458057be4ba8c88b7d1deeefa8dbc2992be3",
+    "assets/ui-skins-DfdNA7Ho.png": "76e50668bacdd85a7986d74bd4651582422ccb5e59398cfeefa78695aa366941",
+    "assets/catch-04-CR_5HDjF.wav": "9c32ef16160efa0c124be3c914dc5aea73f84767f001c8aa7ba04b04bb47d66a",
+    "assets/orchard-backdrop-BCkXt388.png": "f29c0f60b9894243de10e3387b4d67bb2ae10d381d52be0c6ca7842bc645f2b0",
+    "assets/catch-03-Bzf1kjW5.wav": "533e4ab438b2ebc3d4bb25685a3e0ca04364c6d97a4b41fbbdf6a983140437ff",
+    "assets/apples.atlas-AiRL-7dt.json": "91cc03f3b6115ee704ee36b23e31f4d03103d146690b65b66cc93ac4fbf8815e",
+    "assets/noto-sans-sc-game-C4or3IqV.woff2": "a0f88a76a0ef907f245152d77c2a80fda6705159d6b990f1332484e1ae93ea77",
+    "assets/baskets-1ca5g3mR.png": "b32ba68af8b5bffc979a4e2f0437216dd42a6c7831428ba74c307e754bfa33ef",
+    "assets/index-Bj8ysIWm.js": "507c880197f7c70346fcfbd1a0baf6c659aae659a9ddd2954bcb4271f09f76b8",
+    "assets/catch-10-CSEiPKsN.wav": "f64a2f8eb05ffadaf7b1f1e1a9d37640b6c9b0b59b9e07a7af83ad522f9036da"
+  },
+  "observations": [
+    {
+      "name": "title",
+      "at": 945.5999999046326,
+      "title": true,
+      "paused": false,
+      "result": false,
+      "headings": [
+        "苹果接接乐"
+      ],
+      "live": "",
+      "focus": "开始游戏",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        },
+        {
+          "text": "开始游戏",
+          "label": null,
+          "x": 480,
+          "y": 356,
+          "width": 320,
+          "height": 104
+        }
+      ]
+    },
+    {
+      "name": "play",
+      "at": 1793.0999999046326,
+      "title": false,
+      "paused": false,
+      "result": false,
+      "headings": [],
+      "live": "已接住 0 个，漏接 0 个",
+      "focus": "\n    \n    声音接住0/ 10漏接0/ 3已接住 0 个，漏接 0 个\n  \n\n",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        }
+      ]
+    }
+  ],
+  "trace": [
+    {
+      "at": 1793440848591,
+      "click": ".btn-start"
+    },
+    {
+      "at": 1793440849457,
+      "browserAction": "activate another owned tab, triggering actual visibility/focus loss"
+    }
+  ],
+  "durationMs": 22527
+}

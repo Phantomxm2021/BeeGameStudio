@@ -96,6 +96,17 @@ describe('resource semantic model runtime bridge', () => {
     expect(response.status).toBe(401)
   })
 
+  test('a public desktop resource connection cannot authorize the internal curation bridge', async () => {
+    let called = false
+    const app = createAgentWorkflowApp({ defaultWorkspacePath: tmpdir(), currentUser: { id: 'owner-1', role: 'owner' },
+      resourceSelectionRuntimeConfig: { baseUrl: 'https://resources.example.test' },
+      modelRuntimeHost: { generate: async () => { called = true; return '{}' } } })
+    const response = await app.request('/api/internal/resource-semantic-curation', { method: 'POST',
+      headers: { 'x-beegame-resource-service-token': 'arbitrary' } })
+    expect(response.status).toBe(401)
+    expect(called).toBe(false)
+  })
+
   test('rejects a model projection without rendered visual input before invoking the model runtime', async () => {
     let called = false
     const app = createAgentWorkflowApp({

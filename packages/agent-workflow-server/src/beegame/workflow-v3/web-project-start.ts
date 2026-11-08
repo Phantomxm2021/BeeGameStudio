@@ -27,7 +27,7 @@ export async function observeProjectCreation(root: string, brief: {
 }): Promise<Run['creation']> {
   if (brief.build_source != null || !['creative', 'blueprint'].includes(String(brief.creation_mode)) ||
       (await sourcePaths(await realpath(root))).length) return undefined
-  return {initialDelivery:'complete-game',editableContent:false}
+  return {initialDelivery:'complete-game',editableContent:false,creativeStages:1,verification:'isolated'}
 }
 
 /** These Web runtimes use project code, not the BGS editor contract. */

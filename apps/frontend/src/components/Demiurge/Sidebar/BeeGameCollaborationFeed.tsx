@@ -124,7 +124,6 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
     return message.taskKind === 'context_update' || raw.task_kind === 'context_update' ||
         message.taskKind === 'context_compaction' || raw.task_kind === 'context_compaction' ||
         message.taskKind === 'delivery_phase' || raw.task_kind === 'delivery_phase' ||
-        message.taskKind === 'delivery_error' || raw.task_kind === 'delivery_error' ||
         message.taskKind === 'design_revision' || raw.task_kind === 'design_revision' ||
         message.taskKind === 'runtime_notice' || raw.task_kind === 'runtime_notice' ||
         message.taskKind === 'session_lifecycle' || raw.task_kind === 'session_lifecycle';
@@ -416,6 +415,9 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     };
 
     for (const message of messages) {
+        // Host delivery/stop receipts stay in the transcript, not in the chat UI.
+        if (message.taskKind === 'delivery_error' ||
+            (message as ChatDisplayMessage & { task_kind?: string }).task_kind === 'delivery_error') continue;
         // Lifecycle receipts anchor time without adding visible chat messages.
         if ((message.taskKind === 'session_lifecycle' && message.content === 'running') || message.taskKind === 'host_evidence' ||
             (message as ChatDisplayMessage & { task_kind?: string }).task_kind === 'host_evidence') continue;
@@ -456,15 +458,6 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
         }
 
         if (isContextUpdateMessage(message)) {
-            const previous = entries.at(-1);
-            // The host can repeat a native failure as its workflow-stop reason.
-            // Keep the retryable error card; unrelated handoff failures stay visible.
-            if (message.taskKind === 'delivery_error' && message.taskId && previous?.kind === 'context' &&
-                previous.message.type === 'error' && previous.message.taskId === message.taskId &&
-                (!(message.turnId || message.turn_id) ||
-                    (message.turnId || message.turn_id) === (previous.message.turnId || previous.message.turn_id)) &&
-                [`任务已停止，尚未完成：${previous.message.content}`,
-                    `Task stopped before completion: ${previous.message.content}`].includes(message.content)) continue;
             entries.push({ kind: 'context', message });
             activeTurn = null;
             continue;
@@ -1148,7 +1141,7 @@ const deliveryPhaseLabels: Record<string, Record<string, string>> = {
 
 function ContextUpdateSeparator({ message, text, lang }: { message: ChatDisplayMessage; text: BeeGameText; lang: Language }) {
     const labels = deliveryPhaseLabels[lang] || deliveryPhaseLabels.en;
-    const label = ['delivery_error', 'design_revision', 'runtime_notice'].includes(message.taskKind ?? '') ? displayText(message.content)
+    const label = ['design_revision', 'runtime_notice'].includes(message.taskKind ?? '') ? displayText(message.content)
         : message.taskKind === 'delivery_phase' ? labels[message.content] || message.content
         : message.taskKind === 'session_lifecycle'
             ? message.content === 'stopped' ? lang === 'zh' ? '任务已停止' : lang === 'zh-TW' ? '任務已停止' : lang === 'ja' ? 'タスク停止' : lang === 'ko' ? '작업 중지' : 'Task stopped'

@@ -6,7 +6,7 @@ import {
   type BeeGameAssetManifest,
   type BeeGameProjectResourceSource,
 } from './asset-contracts'
-import { RESOURCE_DIMENSIONS, RESOURCE_ASSET_KINDS, RESOURCE_SOURCE_KINDS, RESOURCE_LIBRARY_USAGE } from '@bee-game-studio/beegame-resource-core'
+import { RESOURCE_DIMENSIONS, RESOURCE_ASSET_KINDS, RESOURCE_SOURCE_KINDS, RESOURCE_LIBRARY_USAGE, type ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 
 export const assetSourceAuthoringExamples = {
   'resource-library': {
@@ -91,8 +91,10 @@ export function assetManifestAuthoringExamples(): {
   }
 }
 
-export function renderAssetManifestAuthoringContract(section: 'registration' | 'atlas' | 'tilemap' | 'full' = 'full'): string {
+export function renderAssetManifestAuthoringContract(section: 'registration' | 'atlas' | 'tilemap' | 'full' = 'full', configured = false, resourceLibraryUsage?: ResourceLibraryUsage): string {
   const examples = assetManifestAuthoringExamples()
+  if (resourceLibraryUsage) examples.canonical.project_target!.resource_library_usage = resourceLibraryUsage
+  else delete examples.canonical.project_target!.resource_library_usage
   const json = (value: unknown) => JSON.stringify(value, null, 2)
   const registration = `## Registration request
 
@@ -101,11 +103,11 @@ Required acquisition_profile enums (case-sensitive, non-empty arrays):
 - dimensions: ${RESOURCE_DIMENSIONS.join(', ')}
 - asset_kinds: ${RESOURCE_ASSET_KINDS.join(', ')}
 
-Minimal local-authoring request (replace placeholder IDs, runtime, formats and filenames; retain the fixed BGS roots):
+${configured ? 'Project configuration already exists; omit projectTarget and existing requirements. Use actual requirement IDs from --list.' : 'First registration: provide the actual project target and requirements once; replace example IDs, runtime, formats and paths.'}
 
 \`\`\`json
-${json({ operation: 'register', projectTarget: examples.canonical.project_target,
-  requirements: examples.canonical.requirements, resources: [{
+${json({ operation: 'register', ...(!configured ? {projectTarget: examples.canonical.project_target,
+  requirements: examples.canonical.requirements} : {}), resources: [{
     id: 'EXAMPLE-RUNTIME-DATA-01', fulfills: ['EXAMPLE-RUNTIME-DATA'],
     root_path: 'assets/runtime/example/resource.json', file_paths: ['assets/runtime/example/resource.json'],
     provisional: false, reason: 'Locally authored example data.', selection_reason: ['Matches the actual requirement.'],
@@ -117,7 +119,8 @@ The example target supports JSON only; supply the actual approved runtime and su
 For locally authored files, omit source and supply resource.reason. Explicit source accepts web or resource-library provenance; user-provided files use the upload/import path.
 Hashes, status, timestamps and registry modules are computed, not request fields.
 fulfills names actual requirement IDs. root_path is a loadable file in file_paths; selection_reason is a non-empty string array.
-On later registration, omit projectTarget or pass it unchanged; existing requirements cannot be redefined.
+On later registration, omit projectTarget and unchanged requirements; existing definitions are retained.
+To reuse a saved generate/fetch result, replace root_path/file_paths/source/dependencies with acquisition:"assets/result.json". Keep id, fulfills, provisional, reason and selection_reason. For a saved media result, use the same acquisition field but retain the original source and dependencies in the declaration. The host checks saved file hashes and retains decoded facts; acquisition is not a quality verdict or inferred runtime support.
 Use --contract full for source fields and saved registry examples; --contract atlas or --contract tilemap for those formats.
 `
   const atlas = `## Sprite atlas contract
@@ -230,7 +233,7 @@ tools directory supplied in the project context. Read formats with
 \`bun <current-tools-directory>/resources.mjs --contract full\` or select
 \`registration\`, \`atlas\`, or \`tilemap\` as needed.
 
-\`CheckResourcesAndBindings {}\` inspects Manifest requirements and actual
+\`bun <current-tools-directory>/resources.mjs --check\` inspects Manifest requirements and actual
 registered files, hashes, members and atlas structures; no platform requires
 BGS Scene/UI JSON or a content index. Native bindings and action/state wiring
 need target-runtime observations. Registration and --list do not certify complete

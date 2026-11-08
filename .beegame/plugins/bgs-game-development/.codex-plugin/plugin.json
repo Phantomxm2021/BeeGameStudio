@@ -1,0 +1,25 @@
+{
+  "name": "bgs-game-development",
+  "version": "1.0.10",
+  "description": "Game design, artwork, runtime implementation and playtesting methods. Select the relevant specialist Skills for the current task.",
+  "skills": [
+    "./beegame-interaction-contracts",
+    "./bgs-3d-asset",
+    "./game-art-director-expert",
+    "./game-audio-designer",
+    "./game-balance-designer-expert",
+    "./game-content-pipeline-engineer",
+    "./game-creative-director-expert",
+    "./game-design-check",
+    "./game-feel-designer",
+    "./game-level-designer-expert",
+    "./game-playtest-performance",
+    "./game-systems-designer-expert",
+    "./game-technical-artist",
+    "./game-ui-ux-designer",
+    "./phaser4-gamedev",
+    "./spatial-computing-game-expert",
+    "./spatial-computing-ux-designer-expert",
+    "./threejs-gamedev"
+  ]
+}

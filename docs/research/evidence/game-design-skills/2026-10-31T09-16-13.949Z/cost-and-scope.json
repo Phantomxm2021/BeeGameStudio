@@ -1,0 +1,45 @@
+{
+  "BGSModelCalls": 0,
+  "BGSModelTokens": 0,
+  "BGSServiceRestarts": 0,
+  "newProductionStages": 0,
+  "newSkillEntries": 0,
+  "catalogEntries": 21,
+  "newDependencies": [],
+  "skillEntrypoints": [
+    {
+      "name": "game-systems-designer-expert",
+      "entryBeforeBytes": 2361,
+      "entryAfterBytes": 2652,
+      "deltaBytes": 291
+    },
+    {
+      "name": "game-level-designer-expert",
+      "entryBeforeBytes": 3367,
+      "entryAfterBytes": 3703,
+      "deltaBytes": 336
+    },
+    {
+      "name": "game-playtest-performance",
+      "entryBeforeBytes": 8126,
+      "entryAfterBytes": 8159,
+      "deltaBytes": 33
+    }
+  ],
+  "references": [
+    {
+      "path": ".beegame/skills/bgs-game-skills/game-systems-designer-expert/references/experience-questions.md",
+      "bytes": 2327
+    },
+    {
+      "path": ".beegame/skills/bgs-game-skills/game-level-designer-expert/references/player-guidance-and-progression.md",
+      "bytes": 2635
+    },
+    {
+      "path": ".beegame/skills/bgs-game-skills/game-playtest-performance/references/experience-validation.md",
+      "bytes": 3568
+    }
+  ],
+  "browserRunMs": 18109,
+  "limits": "No BGS model selection/application benchmark. Byte deltas are not token measurements. Current Codex research/authoring tokens were not available as an attributable BGS usage record."
+}

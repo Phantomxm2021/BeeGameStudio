@@ -81,7 +81,7 @@ export type Run = {
   // Host-observed blank-project intake, not a phase or model-authored plan.
   // Absent on existing/imported runs; never infer it from missing content later.
   // webStarter/webBoot are historical observations only; new intake never assigns them.
-  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version' | 'complete-game'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1'; webBoot?: 'react-web-storage-v1' };
+  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version' | 'complete-game'; editableContent: boolean; creativeStages?: 1; verification?: 'isolated'; webStarter?: 'react-canvas-2d-v1'; webBoot?: 'react-web-storage-v1' };
   // Historical installation receipt only. It neither locks project sources
   // nor dictates entry points; retain it without rewriting the saved history.
   webBoot?: { version: 'react-web-storage-v1'; files: FileVersion[] };
@@ -134,6 +134,8 @@ export type AgentTurn = {
     }>;
   };
   productionHandoff?: import('./production-workflow').ProductionHandoff;
+  // Small native result, never a fixed project report or independent quality verdict.
+  implementationVerification?: import('./production-workflow').ImplementationVerificationResult;
   // Selected reference bytes; recording them does not end this implementation turn.
   visualSelection?: import('./production-workflow').ProductionHandoff;
   designReviews?: import('./design-review').DesignReviewReceipt[];

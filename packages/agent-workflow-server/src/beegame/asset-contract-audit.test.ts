@@ -340,11 +340,12 @@ test.each(['missing metadata', 'missing image hash', 'missing metadata hash', 'b
   const failed = kind === 'missing metadata' || kind === 'bad hash'
   expect(audit.valid).toBe(!failed)
   const structure = audit.requirements[0]!.structure!
-  expect(structure.status).toBe(failed ? 'failed' : 'unverified')
+  const inspected = kind === 'missing declaration' || kind === 'different declaration'
+  expect(structure.status).toBe(failed ? 'failed' : inspected ? 'passed' : 'unverified')
   if (kind === 'missing image hash' || kind === 'missing metadata hash')
     expect(structure.observations.join(' ')).toContain('recorded hashes are missing')
-  if (kind === 'missing declaration' || kind === 'different declaration')
-    expect(structure.observations.join(' ')).toContain('declared coverage incomplete')
+  if (inspected)
+    expect(structure.observations.join(' ')).toContain('file/header facts satisfy the supported structural checks')
 })
 
 test.each([
@@ -658,21 +659,35 @@ describe('resource contract boundaries', () => {
 })
 
 
-test.each(['rgba', 'palette', 'opaque', 'unknown-capability'] as const)('PNG alpha obligation uses inspected bytes: %s', async kind => {
+test.each(['rgba', 'palette', 'opaque', 'unknown-capability', 'undeclared-alpha', 'different-capability',
+  'undeclared-unknown-capability', 'missing-usage', 'different-usage', 'matching-usage'] as const)(
+  'PNG structure uses inspected bytes without treating declarations as evidence: %s', async kind => {
   const value=manifest(), resource=value.resources[0]!
   value.project_target!.asset_format_capabilities=['png']
   value.requirements[0]!.acquisition_profile.asset_kinds=['sprite']
-  value.requirements[0]!.acquisition_profile.capabilities=kind==='unknown-capability'?['alpha','frame-sequence']:['alpha']
+  const unknown = kind==='unknown-capability' || kind==='undeclared-unknown-capability'
+  value.requirements[0]!.acquisition_profile.capabilities=unknown?['alpha','frame-sequence']:['alpha']
   resource.asset_kind='sprite';resource.capabilities=[...(value.requirements[0]!.acquisition_profile.capabilities??[])]
+  if(kind==='undeclared-alpha' || kind==='undeclared-unknown-capability') resource.capabilities=[]
+  if(kind==='different-capability') resource.capabilities=['atlas']
+  if(kind==='missing-usage' || kind==='different-usage' || kind==='matching-usage') {
+    value.requirements[0]!.acquisition_profile.capabilities=[]
+    value.requirements[0]!.acquisition_profile.coverage=[{asset_kinds:['sprite'],capabilities:['alpha'],usage_tags:['ui']}]
+    resource.usage_tags=kind==='matching-usage'?['ui']:kind==='different-usage'?['scenery']:[]
+  }
   resource.root_path='assets/runtime/model.png';resource.file_paths=[resource.root_path]
   const workspace=await writeFixture(value)
   const pixels=sharp({create:{width:8,height:8,channels:4,background:'#fff0'}})
   const bytes=await (kind==='opaque'?pixels.removeAlpha():pixels).png({palette:kind==='palette'}).toBuffer()
   await writeFile(join(workspace,resource.root_path),bytes)
   const result=auditAssetContract(workspace)
-  expect(result.requirements[0]!.structure!.status).toBe(kind==='opaque'?'failed':kind==='unknown-capability'?'unverified':'passed')
+  const missingUsage=kind==='missing-usage' || kind==='different-usage'
+  expect(result.valid).toBe(kind!=='opaque')
+  expect(result.requirements[0]!.structure!.status).toBe(kind==='opaque'?'failed':unknown || missingUsage?'unverified':'passed')
   expect(result.resources[0]!.fileEvidence[0]!.facts.hasAlpha).toBe(kind!=='opaque')
   if(kind==='opaque')expect(result.issues.join(' ')).toContain('required alpha capability is absent')
+  if(unknown)expect(result.requirements[0]!.structure!.observations.join(' ')).toContain('unverified capabilities/components [frame-sequence]')
+  if(missingUsage)expect(result.requirements[0]!.structure!.observations.join(' ')).toContain('required usage tags not declared')
 })
 
 test.each(['audio-clip','music','ambience','voice','loop','unsupported','broken-member'] as const)(

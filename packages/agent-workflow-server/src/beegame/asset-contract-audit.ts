@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { candidateCoversObligation, type ResourceCoverageObligation } from '@bee-game-studio/beegame-resource-core'
+import type { ResourceCoverageObligation, ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
 import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
@@ -245,22 +245,13 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
       const atlasSprites = candidates.map(resource => resource.asset_kind === 'sprite-atlas' &&
         !obligation.assetKinds?.includes('sprite-atlas') && obligation.assetKinds?.includes('sprite')
         ? inspectNamedAtlas(resource, resources.find(row => row.id === resource.id)!) : undefined)
-      const declarations = candidates.map((resource, index) => candidateCoversObligation({
-        assetKind: atlasSprites[index]?.status === 'passed' ? 'sprite' : resource.asset_kind,
-        usageTags: resource.usage_tags ?? [], capabilities: resource.capabilities ?? [],
-        relations: (resource.relation_kinds ?? []).map(kind => ({kind})),
-        contentProfile: { components: [
-          ...(resource.embedded_kinds ?? []).map(kind => ({kind})),
-          ...(Array.isArray(resource.content_profile?.components)
-            ? resource.content_profile.components.filter((item): item is {kind:string} => !!item && typeof item.kind === 'string') : []),
-        ] },
-      }, obligation))
-      // Declared coverage and file evidence are separate. Missing labels alone
-      // are not proof a format lacks the requested structure.
+      // Inspected structure does not need the same capability asserted again.
+      // Usage labels remain declarations: file bytes cannot establish their role.
       const evidence = candidates.map((resource, index) => {
         const item = inspectObligation(resource, resources.find(row => row.id === resource.id)!, obligation, atlasSprites[index])
-        return !declarations[index] && item.status === 'passed'
-          ? { status: 'unverified', reason: item.reason+'; declared coverage incomplete' } : item
+        return item.status === 'passed' && obligation.usageTags?.length &&
+          !obligation.usageTags.some(tag => resource.usage_tags?.includes(tag))
+          ? { status: 'unverified', reason: item.reason+'; required usage tags not declared' } : item
       })
       const status = evidence.some(item => item.status === 'passed') ? 'passed' :
         (evidence.length && evidence.every(item => item.status === 'failed')) || (bound.length && !candidates.length) ? 'failed' : 'unverified'
@@ -387,4 +378,21 @@ function projectFile(workspace: string, filePath: string): string | undefined {
     if (physical === '..' || physical.startsWith(`..${sep}`) || isAbsolute(physical)) return undefined
   }
   return absolute
+}
+
+/** Source-bound delivery facts only; actual runtime consumption remains an observation. */
+export function requiredLibraryDeliverySources(workspace: string, usage?: ResourceLibraryUsage): string[] {
+  if (usage !== 'required') return []
+  const manifest = readBeeGameAssetManifestSync(workspace)
+  if (manifest.project_target?.resource_library_usage !== 'required')
+    throw new BeeGameAssetManifestError(['Confirmed resource_library_usage=required is not established in the resource configuration.'])
+  const requiredIds = new Set(manifest.requirements.filter(item => item.required !== false).map(item => item.id))
+  const selected = manifest.resources.filter(item => item.source.type === 'resource-library' &&
+    item.status === 'verified' && !item.provisional && item.fulfills.some(id => requiredIds.has(id)))
+  if (!selected.length)
+    throw new BeeGameAssetManifestError(['Required library resources have not been delivered: register intact, non-provisional library files bound to a required resource need.'])
+  const audit = auditAssetContract(workspace, selected.map(item => item.id))
+  if (!audit.valid) throw new BeeGameAssetManifestError([...audit.issues,
+    ...audit.resources.flatMap(item => item.issues), ...audit.requirements.flatMap(item => item.issues)])
+  return [...new Set([...readBeeGameAssetManifestModulePathsSync(workspace), ...selected.flatMap(item => item.file_paths)])]
 }

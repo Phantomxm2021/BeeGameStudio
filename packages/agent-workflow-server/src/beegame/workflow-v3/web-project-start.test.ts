@@ -29,7 +29,7 @@ async function fixture(legacy = true) {
 test('creation facts cover blank creative and blueprint intake; source/import/unknown are not silently migrated',async()=>{
   const f=await fixture(false)
   try {
-    expect(f.run.creation).toEqual({initialDelivery:'complete-game',editableContent:false})
+    expect(f.run.creation).toEqual({initialDelivery:'complete-game',editableContent:false,creativeStages:1,verification:'isolated'})
     for(const path of ['.beegame','.beegame-attachments','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'.gitignore'),'# Git configuration is not game source\nnode_modules/\n')
     await writeFile(join(f.root,'logs/index.json'),'{}')
@@ -40,7 +40,7 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:undefined})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:'unknown'})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,bgsVisualEditing:false}}))
-      .toEqual({initialDelivery:'complete-game',editableContent:false})
+      .toEqual({initialDelivery:'complete-game',editableContent:false,creativeStages:1,verification:'isolated'})
     expect((await observeProjectCreation(f.root,{...brief,settings:{platform:'Native',engine:'Unity'}}))?.webStarter).toBeUndefined()
     await writeFile(join(f.root,'README.md'),'Existing user source')
     expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
@@ -62,9 +62,9 @@ test.each(['React','Phaser','Three.js','Unity','Godot','Unreal'])('new-game crea
   const f=await fixture(false)
   try{
     const creation=await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,engine}})
-    expect(creation).toEqual({initialDelivery:'complete-game',editableContent:false})
+    expect(creation).toEqual({initialDelivery:'complete-game',editableContent:false,creativeStages:1,verification:'isolated'})
     const assignment=initialProductionAssignment({...f.run,productionWorkflow:1,creation})
-    expect(assignment).toEqual({stage:'design',originRequestKey:f.run.requestKey,stopAfter:'implementation'})
+    expect(assignment).toEqual({stage:'discovery',originRequestKey:f.run.requestKey})
   }finally{await f.close()}
 })
 

@@ -7,11 +7,17 @@ BGS 基于选定的官方 Codex 版本。原生执行、Goal 计数、历史恢�
 - 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/codex-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.167.0`：上游命名的维护分支，仅保留 CLI 展示／图标、禁止官方二进制覆盖源码包的打包保护及 workspace 锁文件版本修正；三个非品牌行为补丁已撤除。
+- `bgs/source-0.167.0`：上游命名的维护分支，仅保留 CLI 展示／图标、Prompt 身份文案与对应测试预期、禁止官方二进制覆盖源码包的打包保护及 workspace 锁文件版本修正；三个非品牌行为补丁已撤除。
 - `bgs/0.167.0`：由维护分支加受限配置根／文档转换生成；保留官方内部名称及协议。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
 - 受限转换在 `scripts/brand-bgs.py`：默认只报告，`--apply` 才写入；只处理受 Git 管理的源码，不重命名文件／类型／协议，不处理宿主或用户运行数据。原生配置根使用 BGS_HOME／.bgs，项目配置与其沙箱保护一致使用 .bgs，系统配置和管理域属于 BGS；其他内部实现沿用官方。
 
 后续更新在维护分支合并选定的官方版本，先审阅相对官方的全部差异，再生成发行分支并核对。不得自动延续非品牌行为补丁，也不得将自写测试断言作为偏离官方的依据；机械可复现不等于语义正确或外部兼容性已验证。
+
+2026-11-07 品牌文案核对：内置模型目录、未知模型默认 Prompt、协议默认 Prompt、实时和记忆模板中的本产品身份使用 BGS；OpenAI Codex 来源、模型 slug、工具命名空间、协议字段、`Codex-verified` 可信消息标记及 Codex Cloud 服务名称保留。身份修改作为维护源码中的显式品牌补丁，并同步已有测试预期；不改变官方行为指令或会话优先级，也不改写已有历史或远端／用户自定义 Prompt。Windows 配置断言与实际的 PhantomLab/BGS 路径一致。
+
+宿主不再从其他模型的 `# Using skills` 章节为未知模型追加指令。未知模型沿用官方 fallback 及配置，原生 Skills 的发现、显式提及和工具读取保留。此次仅修改源码与相关回归，不自动编译发布或重启服务；已安装的运行包仍以自身 build.json 为准。
+
+SQLite 目录覆盖使用 `BGS_SQLITE_HOME`，TUI 录制使用 `BGS_TUI_RECORD_SESSION`／`BGS_TUI_SESSION_LOG_PATH`，不读取 Codex 对应变量，也不提供静默回退。默认仍在原 BGS_HOME 下；显式 `sqlite_home` 配置的官方优先级保留。若旧的独立 BGS 启动方式依赖 `CODEX_SQLITE_HOME`，须确认原目录属于 BGS 后显式改用新变量指向它；系统不自动迁移、接管、清理或改写该目录及 Codex 的数据。配置说明同步使用 BGS 名称，内部类型、协议字段及第三方服务标识仍沿官方。
 
 ## 运行位置
 
@@ -22,7 +28,7 @@ BGS 基于选定的官方 Codex 版本。原生执行、Goal 计数、历史恢�
 | 原生伴随程序 | `codex-code-mode-host` |
 | CLI 配置根 | `BGS_HOME`，默认 `~/.bgs` |
 | BGS 每用户配置根 | `.runtime/app/bgs` |
-| 内置游戏 Skills | 应用共享目录 `.beegame/skills/bgs-game-skills`，通过 `skills/extraRoots/set` 直接加载，所有 BGS 账户共用、只读 |
+| 内置专业 Plugin | 只读源包 `.beegame/plugins/bgs-game-development`；各账户通过原生 marketplace/plugin 安装与发现，配置和缓存独立。不创建旧 Skills 源路径链接 |
 | 用户 Skills | 账户 `.runtime/app/skills`，同接口按账户独立加载；不共享用户内容 |
 | 运行器系统 Skills | `$BGS_HOME/skills/.system`，由运行器维护 |
 
@@ -46,7 +52,7 @@ BGS 基于选定的官方 Codex 版本。原生执行、Goal 计数、历史恢�
 
 宿主对所有平台声明 `scene_ui_editor_available:false`；历史内容读取始终只读，直接保存入口返回 `editor-unavailable`，不申请 writer。历史编辑记录、退出证明和恢复清理能力保留，不重放旧保存。
 
-`CheckResourcesAndBindings {}` 独立核验 Manifest 需求与真实资源。旧内容格式只有被显式请求检查或报告明确声明对应检查时才参与历史数据核验；GDD 中的路径、目录或 `content/index.json` 的存在本身不会启用旧合同。实际构建、运行、资源、设计版本与视觉交付校验继续保留，共享资源／字体／媒体实现和历史运行库不整体删除。
+`resources.mjs --check` 独立核验 Manifest 需求与真实资源。旧内容格式只有被显式请求检查或报告明确声明对应检查时才参与历史数据核验；GDD 中的路径、目录或 `content/index.json` 的存在本身不会启用旧合同。实际构建、运行、资源、设计版本与视觉交付校验继续保留，共享资源／字体／媒体实现和历史运行库不整体删除。
 
 测量、执行回执、交付及重新发布构建统一使用既有排除清单，将 `reports/` 和 `docs/TASKS.md` 作为非运行输入；它们不进入实际构建副本。旧构建仍按原回执保存的清单核验，显式引用的证据仍独立校验哈希；源码、测试、资源与需求变化继续使相应证据失效。
 

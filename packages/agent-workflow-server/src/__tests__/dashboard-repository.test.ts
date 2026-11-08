@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,8 @@ import { resolveRuntimeFeatureSettings } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
 import { upsertMcpServer } from '../mcp-servers-store'
+import { createBeeGameSkillsServerApp } from '../../../beegame-skills-server/src/app'
+import { LocalBeeGameSkillsRepository } from '@bee-game-studio/beegame-skills-core/store'
 
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 
@@ -55,14 +57,14 @@ describe('DashboardRepository Supabase boundaries', () => {
       // Simulates a previously saved entry. It must not gain trust merely by existing in storage.
       upsertMcpServer({ name: 'Stored host command', enabled: true, autoStart: true, scope: 'global',
         transport: 'stdio', command: 'never-executed' }, { dataDir: root })
-      expect(JSON.parse((await repository.getRuntimeEnv(root, 'alice', 'synthetic-owner-token'))
+      expect(JSON.parse((await repository.prepareAgentRuntimeEnv(root, 'alice', 'synthetic-owner-token'))
         .BEEGAME_NATIVE_MCP_SERVERS_JSON)).toHaveLength(1)
       user = { id: 'alice', role: 'developer' }
-      await expect(repository.getRuntimeEnv(root, 'alice', 'synthetic-owner-token')).rejects.toThrow('workspace.manage')
+      await expect(repository.prepareAgentRuntimeEnv(root, 'alice', 'synthetic-owner-token')).rejects.toThrow('workspace.manage')
       user = { id: 'bob', role: 'owner' }
-      await expect(repository.getRuntimeEnv(root, 'alice', 'synthetic-owner-token')).rejects.toThrow('workspace.manage')
+      await expect(repository.prepareAgentRuntimeEnv(root, 'alice', 'synthetic-owner-token')).rejects.toThrow('workspace.manage')
       const unbound = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false })
-      await expect(unbound.getRuntimeEnv(root, 'alice')).rejects.toThrow('workspace.manage')
+      await expect(unbound.prepareAgentRuntimeEnv(root, 'alice')).rejects.toThrow('workspace.manage')
       await expect(repository.upsertMcpServer(new Request('http://fixture'), { id: 'alice', role: 'developer' }, {
         name: 'Host', transport: 'stdio', command: 'never-executed', enabled: true, scope: 'global',
       })).rejects.toThrow('workspace.manage')
@@ -76,10 +78,10 @@ describe('DashboardRepository Supabase boundaries', () => {
     try {
       upsertMcpServer({name:'Fixture',enabled:true,transport:'stdio',scope:'beegame',command:'fixture',
         autoStart:true,env:[{key:'TOKEN',value:'synthetic-private-token'}]}, {dataDir:a})
-      expect(JSON.parse((await repository.getRuntimeEnv(a,'a')).BEEGAME_NATIVE_MCP_SERVERS_JSON)).toMatchObject([
+      expect(JSON.parse((await repository.prepareAgentRuntimeEnv(a,'a')).BEEGAME_NATIVE_MCP_SERVERS_JSON)).toMatchObject([
         {command:'fixture',env:[{key:'TOKEN',value:'synthetic-private-token'}]},
       ])
-      expect(JSON.parse((await repository.getRuntimeEnv(b,'b')).BEEGAME_NATIVE_MCP_SERVERS_JSON)).toEqual([])
+      expect(JSON.parse((await repository.prepareAgentRuntimeEnv(b,'b')).BEEGAME_NATIVE_MCP_SERVERS_JSON)).toEqual([])
       expect(JSON.stringify(await repository.listMcpServers(new Request('http://fixture'),{id:'a',role:'owner'}))).not.toContain('synthetic-private-token')
     } finally { await rm(root,{recursive:true,force:true}) }
   })
@@ -92,7 +94,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
     try {
       for (const key of keys) process.env[key] = 'retained-fixture-value'
-      const env = await repository.getRuntimeEnv(dataRoot)
+      const env = await repository.prepareAgentRuntimeEnv(dataRoot)
       for (const key of keys) {
         expect(env).not.toHaveProperty(key)
         expect(process.env[key]).toBe('retained-fixture-value')
@@ -124,7 +126,7 @@ describe('DashboardRepository Supabase boundaries', () => {
         repository.loadRuntimeSettings(request, user),
       ).resolves.toEqual(resolveRuntimeFeatureSettings({}))
       await expect(
-        repository.getRuntimeEnv(userRoot, user.id),
+        repository.prepareAgentRuntimeEnv(userRoot, user.id),
       ).resolves.not.toHaveProperty('SKILL_SEARCH_ENABLED')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
@@ -144,8 +146,8 @@ describe('DashboardRepository Supabase boundaries', () => {
     try {
       await writeFile(join(dataRoot, 'runtime-settings.json'), JSON.stringify({ version: 1, config: { mcpSkillsEnabled: false } }))
 
-      const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
-      const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')
+      const ownerAEnv = await repository.prepareAgentRuntimeEnv(userARoot, 'owner-a')
+      const ownerBEnv = await repository.prepareAgentRuntimeEnv(userBRoot, 'owner-b')
 
       expect(ownerAEnv.BGS_HOME).toBe(join(userARoot,'.runtime','app','bgs'))
       expect(ownerBEnv.BGS_HOME).toBe(join(userBRoot,'.runtime','app','bgs'))
@@ -205,7 +207,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
 
     try {
-      const env = await repository.getRuntimeEnv(
+      const env = await repository.prepareAgentRuntimeEnv(
         userRoot,
         'owner-user',
         'authenticated-user-token',
@@ -287,7 +289,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }) as typeof fetch
 
     try {
-      const env = await repository.getRuntimeEnv(userRoot, 'owner-user')
+      const env = await repository.prepareAgentRuntimeEnv(userRoot, 'owner-user')
 
       expect(calls).toEqual([
         'http://skills.test/api/internal/user-skills/enabled?userId=owner-user',
@@ -298,7 +300,7 @@ describe('DashboardRepository Supabase boundaries', () => {
       await expect(
         readFile(
           join(
-            env.BEEGAME_CONFIG_DIR,
+            env.BGS_HOME,
             'skills',
             'user-runtime-skill',
             'SKILL.md',
@@ -336,7 +338,7 @@ describe('DashboardRepository Supabase boundaries', () => {
 
     try {
       await expect(
-        repository.getRuntimeEnv(dataRoot, 'owner-user'),
+        repository.prepareAgentRuntimeEnv(dataRoot, 'owner-user'),
       ).rejects.toThrow('User skills synchronization failed')
     } finally {
       globalThis.fetch = originalFetch
@@ -352,6 +354,7 @@ describe('DashboardRepository Supabase boundaries', () => {
       dataRoot,
       '.runtime',
       'app',
+      'bgs',
       'skills',
       'user-stale',
     )
@@ -376,8 +379,8 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
 
     try {
-      await repository.getRuntimeEnv(dataRoot, 'owner-user')
-      await repository.getRuntimeEnv(dataRoot, 'owner-user')
+      await repository.prepareAgentRuntimeEnv(dataRoot, 'owner-user')
+      await repository.prepareAgentRuntimeEnv(dataRoot, 'owner-user')
       await expect(
         readFile(join(staleSkillDir, 'SKILL.md'), 'utf8'),
       ).rejects.toThrow()
@@ -397,6 +400,7 @@ describe('DashboardRepository Supabase boundaries', () => {
       dataRoot,
       '.runtime',
       'app',
+      'bgs',
       'skills',
       'user-stale',
     )
@@ -409,7 +413,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
 
     try {
-      await repository.getRuntimeEnv(dataRoot, 'owner-user')
+      await repository.prepareAgentRuntimeEnv(dataRoot, 'owner-user')
       await expect(
         readFile(join(staleSkillDir, 'SKILL.md'), 'utf8'),
       ).rejects.toThrow()
@@ -1017,7 +1021,7 @@ test('Supabase MCP tool selections survive real repository save, read and runtim
     cwd: root, transport: 'stdio' as const, command: '/fixture/browser' }
   const enabledTools = ['browser_run_code_unsafe'], disabledTools = ['browser_click']
   const runtimeSelection = async (id: string) => {
-    const env = await repository.getRuntimeEnv(root, owner.id, 'user-token')
+    const env = await repository.prepareAgentRuntimeEnv(root, owner.id, 'user-token')
     return JSON.parse(env.BEEGAME_NATIVE_MCP_SERVERS_JSON!).find((server: { id: string }) => server.id === id)
   }
   try {
@@ -1042,3 +1046,129 @@ test('Supabase MCP tool selections survive real repository save, read and runtim
     expect(await runtimeSelection(legacy.id)).not.toHaveProperty('disabledTools')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+
+test('plain model configuration neither checks MCP permissions nor synchronizes or removes Skills',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-plain-model-env-'))
+  const skill=join(root,'.runtime/app/bgs/skills/user-existing/SKILL.md')
+  await mkdir(join(root,'.runtime/app/bgs/skills/user-existing'),{recursive:true});await writeFile(skill,'existing')
+  let fetches=0,permissions=0
+  const originalFetch=globalThis.fetch
+  const repository=new DashboardRepository({dashboardDataRoot:root,getUserDataRoot:()=>root,
+    skillsConfig:{apiBaseUrl:'https://skills.invalid',required:true},resolveRuntimeUser:async()=>{
+      permissions++;return {id:'owner',role:'developer'}
+    }})
+  try{
+    upsertMcpServer({name:'Host fixture',scope:'global',transport:'stdio',enabled:true,autoStart:true,command:'never-executed'},{dataDir:root})
+    globalThis.fetch=Object.assign(async()=>{fetches++;throw Error('Must not synchronize Skills for model-only work')}, {preconnect:originalFetch.preconnect})
+    const env=await repository.getRuntimeEnv(root,'owner')
+    expect(env.BEEGAME_CONFIG_DIR).toBe(join(root,'.runtime/app'))
+    expect(env).not.toHaveProperty('BEEGAME_NATIVE_MCP_SERVERS_JSON')
+    expect(await readFile(skill,'utf8')).toBe('existing')
+    expect(fetches).toBe(0);expect(permissions).toBe(0)
+    await expect(repository.prepareAgentRuntimeEnv(root,'owner')).rejects.toThrow('workspace.manage')
+    expect(permissions).toBe(1);expect(fetches).toBe(0)
+  }finally{globalThis.fetch=originalFetch;await rm(root,{recursive:true,force:true})}
+})
+
+test.each([false,true])('cancelled Agent preparation leaves Skills intact (required=%s)',async required=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-skill-sync-cancel-'))
+  const folder=join(root,'.runtime/app/bgs/skills/user-existing'),skill=join(folder,'SKILL.md')
+  await mkdir(folder,{recursive:true});await writeFile(skill,'existing')
+  const repository=new DashboardRepository({dashboardDataRoot:root,getUserDataRoot:()=>root,
+    skillsConfig:{apiBaseUrl:'https://skills.invalid',required}})
+  const controller=new AbortController(),reason=new Error('fixture stopped')
+  const originalFetch=globalThis.fetch
+  let entered!:()=>void,calls=0
+  const ready=new Promise<void>(resolve=>entered=resolve)
+  globalThis.fetch=(async(_url,init)=>{
+    calls++;entered()
+    return new Promise<Response>((_resolve,reject)=>init!.signal!.addEventListener('abort',()=>reject(init!.signal!.reason),{once:true}))
+  }) as typeof fetch
+  try{
+    const preparing=repository.prepareAgentRuntimeEnv(root,'owner',undefined,undefined,controller.signal)
+    await ready;controller.abort(reason)
+    await expect(preparing).rejects.toBe(reason)
+    expect(await readFile(skill,'utf8')).toBe('existing');expect(calls).toBe(1)
+    await expect(repository.prepareAgentRuntimeEnv(root,'owner',undefined,undefined,controller.signal)).rejects.toBe(reason)
+    expect(calls).toBe(1)
+  }finally{globalThis.fetch=originalFetch;controller.abort(reason);await rm(root,{recursive:true,force:true})}
+})
+
+
+test('SaaS Skills synchronize only for Agent starts, retain unchanged files, and refresh across workers and service recreation',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-saas-skills-chain-'))
+  const storage=join(root,'service-storage'),nodeA=join(root,'node-a'),nodeB=join(root,'node-b'),bobRoot=join(root,'bob')
+  const skillStore=new LocalBeeGameSkillsRepository({dataDir:storage})
+  const packageFor=(name:string)=>({files:[{path:'SKILL.md',content:`---\nname: ${name}\ndescription: Local SaaS fixture.\n---\n# ${name}`} ]})
+  const alice=await skillStore.importUserSkill('alice',packageFor('alice-only'))
+  const bob=await skillStore.importUserSkill('bob',packageFor('bob-only'))
+  const openService=()=>createBeeGameSkillsServerApp({dataDir:storage,serviceToken:'fixture-service-secret',currentUser:{id:'alice',role:'owner'}})
+  let service=openService(),available=true
+  const requestedOwners:string[]=[],mcpOwners:string[]=[]
+  const originalFetch=globalThis.fetch
+  globalThis.fetch=(async(input,init)=>{
+    const request=new Request(input,init),url=new URL(request.url)
+    expect(url.origin).toBe('https://skills.invalid')
+    expect(url.pathname).toBe('/api/internal/user-skills/enabled')
+    expect(request.headers.get('authorization')).toBe('Bearer fixture-service-secret')
+    requestedOwners.push(url.searchParams.get('userId')!)
+    if(!available)throw Error('Fixture service unavailable')
+    return service.fetch(request)
+  }) as typeof fetch
+  const repository=new DashboardRepository({dashboardDataRoot:root,getUserDataRoot:()=>root,
+    skillsConfig:{apiBaseUrl:'https://skills.invalid',serviceToken:'fixture-service-secret',required:true},
+    supabaseStore:new SupabaseDashboardStore({url:'https://project.supabase.co',anonKey:'fixture-anon',authToken:'fixture-user',fetchImpl:async input=>{
+      const url=new URL(String(input))
+      if(url.pathname==='/rest/v1/beegame_model_configs')return Response.json([])
+      expect(url.pathname).toBe('/rest/v1/beegame_mcp_servers')
+      mcpOwners.push(url.searchParams.get('owner_id')!)
+      return Response.json([])
+    }}),
+    supabaseRuntimeEnvClient:new SupabaseRuntimeEnvClient({url:'https://project.supabase.co',anonKey:'fixture-anon',fetchImpl:async()=>Response.json({env:{}})}),
+  })
+  const prepare=(path:string,owner='alice')=>repository.prepareAgentRuntimeEnv(path,owner,'fixture-user')
+  const runtimeFile=(path:string,slug:string)=>join(path,'.runtime/app/bgs/skills/user-'+slug,'SKILL.md')
+  const identity=(path:string)=>{const{ino,mtimeNs,ctimeNs}=statSync(path,{bigint:true});return{ino,mtimeNs,ctimeNs}}
+  try{
+    await repository.getRuntimeEnv(nodeA,'alice','fixture-user')
+    expect(requestedOwners).toEqual([]);expect(mcpOwners).toEqual([])
+    const first=await prepare(nodeA),file=runtimeFile(nodeA,alice.slug)
+    expect(first.BEEGAME_CONFIG_DIR).toBe(join(nodeA,'.runtime/app'))
+    const before=identity(file)
+    expect(await readFile(file,'utf8')).toContain('# alice-only')
+    expect(existsSync(runtimeFile(nodeA,bob.slug))).toBe(false)
+    for(let i=0;i<3;i++)await repository.getRuntimeEnv(nodeA,'alice','fixture-user')
+    expect(requestedOwners).toEqual(['alice']);expect(mcpOwners).toEqual(['eq.alice'])
+    expect(identity(file)).toEqual(before)
+    await prepare(nodeA)
+    expect(requestedOwners).toEqual(['alice','alice']);expect(identity(file)).toEqual(before)
+    await prepare(nodeB)
+    expect(await readFile(runtimeFile(nodeB,alice.slug),'utf8')).toBe(await readFile(file,'utf8'))
+    await prepare(bobRoot,'bob')
+    expect(await readFile(runtimeFile(bobRoot,bob.slug),'utf8')).toContain('# bob-only')
+    expect(existsSync(runtimeFile(bobRoot,alice.slug))).toBe(false)
+
+    available=false
+    await repository.getRuntimeEnv(nodeA,'alice','fixture-user')
+    expect(requestedOwners).toHaveLength(4)
+    await expect(prepare(nodeA)).rejects.toThrow('User skills synchronization failed')
+    expect(requestedOwners).toHaveLength(5);expect(identity(file)).toEqual(before)
+    available=true
+    // Recreate the real service against its existing storage, without copying data.
+    service=openService()
+    await skillStore.updateUserSkillEnabled('alice',alice.id,false)
+    await repository.getRuntimeEnv(nodeA,'alice','fixture-user')
+    expect(existsSync(file)).toBe(true)
+    await prepare(nodeA);await prepare(nodeB)
+    expect(existsSync(file)).toBe(false);expect(existsSync(runtimeFile(nodeB,alice.slug))).toBe(false)
+    await skillStore.updateUserSkillEnabled('alice',alice.id,true)
+    await prepare(nodeA)
+    expect(await readFile(file,'utf8')).toContain('# alice-only')
+    await skillStore.deleteUserSkill('alice',alice.id)
+    await prepare(nodeA)
+    expect(existsSync(file)).toBe(false)
+    expect(await readFile(runtimeFile(bobRoot,bob.slug),'utf8')).toContain('# bob-only')
+    expect(requestedOwners).toEqual(['alice','alice','alice','bob','alice','alice','alice','alice','alice'])
+  }finally{globalThis.fetch=originalFetch;await rm(root,{recursive:true,force:true})}
+},10000)

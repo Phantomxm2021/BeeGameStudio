@@ -8,7 +8,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { prepareNativeMcpConfig, NATIVE_MCP_CONFIG_ENV } from './native-mcp-config'
 import { mergeRuntimeEnv } from './session-manager'
-import { sharedProjectReads } from './content-checker-runtime'
 
 test('BGS MCP adapts only enabled bound servers, keeps secrets private and discovers a synthetic native tool',async()=>{
   const root = await realpath(await mkdtemp(join(tmpdir(),'bgs-mcp-config-test-')))
@@ -72,26 +71,15 @@ await server.connect(new StdioServerTransport());`
   }
 })
 
-test('project reads expose no measurement or result-reader binding',async()=>{
-  const root = await realpath(await mkdtemp(join(tmpdir(),'bgs-mcp-config-test-')))
+test('no host read MCP is prepared for an empty native configuration',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-empty-mcp-')))
   try {
-    for (const available of [false,true]) {
-      const prepared = await prepareNativeMcpConfig({},root,{platform:'Web'},'fixture',{},available ? (await sharedProjectReads()).path : null)
-      try {
-        const server = (prepared.config.mcp_servers as Record<string,any>)['bgs-ui-layout']
-        if (!available) {
-          expect(server).toBeUndefined()
-          expect(prepared.context).toContain('project read tools: host component unavailable')
-          continue
-        }
-        expect(server.args[1]).toBe(root)
-        expect(server.args).toHaveLength(2)
-        expect(server).not.toHaveProperty('disabled_tools')
-      } finally { await prepared.close() }
-    }
-  } finally { await rm(root,{recursive:true,force:true}) }
+    const prepared=await prepareNativeMcpConfig({},root)
+    expect(prepared.config).toEqual({})
+    expect(prepared.context).toBe('')
+    await prepared.close()
+  }finally{await rm(root,{recursive:true,force:true})}
 })
-
 
 test('native MCP carries explicit tool selections for bound stdio and HTTP connections', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-mcp-config-test-')))
@@ -105,8 +93,7 @@ test('native MCP carries explicit tool selections for bound stdio and HTTP conne
     { ...common, id: 'other-project', transport: 'stdio', command: '/fixture/browser', cwd: undefined, ...selected },
   ]
   const prepared = await prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify(servers) }, root,
-    undefined, undefined, { resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['93.184.216.34'],
-      lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) }) })
+    undefined, { outboundTargetPolicyOptions: { resolve4: () => ['93.184.216.34'], resolve6: () => [] } })
   try {
     const config = prepared.config.mcp_servers as Record<string, any>
     for (const id of ['browser', 'remote']) {
@@ -126,7 +113,7 @@ test('image MCP receives the existing host decoder explicitly without forwarding
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-image-mcp-config-')))
   try {
     for(const decoder of ['file:///host/image-decoder.mjs','']) {
-      const prepared=await prepareNativeMcpConfig({BEEGAME_SHARP_MODULE:decoder,PRIVATE_TOKEN:'not-forwarded'},root,undefined,'fixture',{},undefined,'/host/images.mjs')
+      const prepared=await prepareNativeMcpConfig({BEEGAME_SHARP_MODULE:decoder,PRIVATE_TOKEN:'not-forwarded'},root,'fixture',{},'/host/images.mjs')
       try {
         const server=(prepared.config.mcp_servers as Record<string,any>)['beegame-images']
         expect(server.env.BEEGAME_ASSET_CAPABILITY_FILE).toEqual(expect.any(String))

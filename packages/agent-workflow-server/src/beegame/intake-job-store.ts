@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
+import type { BeeGameModelRuntimeError } from './model-runtime-host'
 
 export type PersistedBeeGameIntakeJob = {
   ownerId: string
@@ -8,6 +9,7 @@ export type PersistedBeeGameIntakeJob = {
   result?: unknown
   error?: string
   errorStatus?: number
+  errorDetails?: Pick<BeeGameModelRuntimeError, 'diagnosticId' | 'failureCode' | 'providerDiagnostics'>
   createdAt: number
   updatedAt: number
 }

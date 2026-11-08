@@ -1,6 +1,6 @@
 # Skill 职责边界审计
 
-> 本文是 2026-10-03 的历史审计记录。文中 `.beegame/skills/builtinskills`、`src/skills/bundled` 及缺失的旧 CLI 路径属于当时工作树；当前内置 Skills 位于 `.beegame/skills/bgs-game-skills`。历史路径不再是可执行入口，原始审计结论保留供追溯。
+> 本文是 2026-10-03 的历史审计记录。文中 `.beegame/skills/builtinskills`、`src/skills/bundled` 及缺失的旧 CLI 路径属于当时工作树；当前专业库源包位于 `.beegame/plugins/bgs-game-development`，通过原生 Plugin 安装。历史路径不再是可执行入口，原始审计结论保留供追溯。
 
 本轮按“Agent prompt 定义任务职责和权限，Skill 提供专业方法”检查仓库技能。问题确实不只在 GDD：一些技能重复了文档归属和阶段政策，另一些 CLI 技能把调用技能理解为更广的行动许可。两者需要区分，不能把所有专业方法、工具约束或安全提醒都删掉。
 

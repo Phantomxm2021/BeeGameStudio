@@ -1,9 +1,10 @@
+import { projectHostDirectory } from './project-storage-paths'
 import { expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { validateConfirmedBriefContext } from './confirmed-brief-context'
+import { confirmedResourceLibraryUsage, validateConfirmedBriefContext } from './confirmed-brief-context'
 import { BeeGameSessionManager, recoverLatestProjectSessionFromDisk, type BeeGameSessionRunner } from './session-manager'
 
 const brief = {
@@ -109,7 +110,7 @@ test(`restored session preserves index and event delivery for ${reason}`, async 
     await first.dispose()
     // Remove only the synthetic locator so this test detects a skipped update,
     // rather than passing because the first session already wrote one.
-    const indexPath = join(workspacePath, 'logs', 'index.json')
+    const indexPath = join(projectHostDirectory(workspacePath), 'logs', 'index.json')
     await rm(indexPath)
     restored.start({ workspacePath, userId: 'owner', projectId: 'game', transcriptSessionId: session.id })
     const delivered: string[] = [], projectDelivered: string[] = []
@@ -138,4 +139,11 @@ test(`restored session preserves index and event delivery for ${reason}`, async 
     await first.dispose(); await restored.dispose()
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('confirmed resource preference is read without backfilling historical goals', () => {
+  expect(confirmedResourceLibraryUsage(JSON.stringify({...brief,resource_library_usage:'required'}))).toBe('required')
+  expect(confirmedResourceLibraryUsage('Historical plain-text request')).toBeUndefined()
+  expect(confirmedResourceLibraryUsage(JSON.stringify({kind:'other',resource_library_usage:'required'}))).toBeUndefined()
+  expect(()=>confirmedResourceLibraryUsage(JSON.stringify({...brief,resource_library_usage:'invalid'}))).toThrow('invalid resource_library_usage')
 })

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { openCodeGoHeaders } from './requests'
+import { normalizeNativeFunctionHistory } from './messages'
 import { modelRuntimeFetch, MODEL_RESPONSE_TIMEOUTS } from '../beegame/model-runtime-transport'
 import {
   getTLSFetchOptions,
@@ -56,6 +57,7 @@ export async function startProviderBridge(
   const active = new Map<AbortController, Promise<void>>()
   let closing = false,
     closed: Promise<void> | undefined
+  let toolArgumentsFailure: string | undefined
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -74,6 +76,10 @@ export async function startProviderBridge(
         return new Response(options.modelCatalog, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
       if (incoming.method !== 'POST' || (route !== path && !compact))
         return new Response('Not found', { status: 404 })
+      // Native may reconnect after a broken stream. An unrecoverable argument
+      // conflict cannot be repaired by paying for that same response again.
+      if (toolArgumentsFailure) return Response.json({ error: { type: 'invalid_request_error',
+        code: 'provider_tool_arguments', message: toolArgumentsFailure + '; automatic resubmission is disabled for this execution.' } }, { status: 400 })
       const abort = new AbortController()
       const started = performance.now(), startedAt = new Date().toISOString(), requestId = crypto.randomUUID()
       let localCompaction = isLocalCompaction(incoming.headers.get('x-codex-turn-metadata'))
@@ -161,7 +167,7 @@ export async function startProviderBridge(
         }
         let response = config.protocol === 'responses'
           ? await requestUpstream(config.baseUrl + '/responses' + (compact ? '/compact' : ''), {
-              method: 'POST', headers, signal, redirect: 'error', body: JSON.stringify(body),
+              method: 'POST', headers, signal, redirect: 'error', body: JSON.stringify(normalizeNativeFunctionHistory(body)),
             })
           : await requestProvider(config, body, requestUpstream, signal, onUsage, options.onToolError, outputBudget)
         // Observe native HTTP failures without changing bytes, headers or retry semantics.
@@ -170,7 +176,7 @@ export async function startProviderBridge(
           httpError = errorBody.details
         }
         if (config.protocol === 'responses')
-          response = await nativeResponses(response, body, onUsage)
+          response = await nativeResponses(response, body, onUsage, message => { toolArgumentsFailure = message })
         if (localCompaction) response = await checkedLocalCompaction(response, body.stream === true)
         if (!response.body) {
           finish('no-body')

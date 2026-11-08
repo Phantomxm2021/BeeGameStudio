@@ -1,3 +1,4 @@
+import { runtimeActivity } from './runtime-activity'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,6 +10,7 @@ import { createAgentWorkflowApp } from '../app'
 import { createModelConfig, exportModelConfigSnapshot, importModelConfigSnapshot } from '@bee-game-studio/agent-workflow'
 import { getUserDashboardDataRoot } from '../local-runtime-service'
 import { loadBeeGameIntakeJob } from './intake-job-store'
+import { BeeGameModelRuntimeError } from './model-runtime-host'
 
 function gate() { let release!: () => void; return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() } }
 
@@ -192,4 +194,76 @@ test('shutdown drains detached intake jobs through final persistence before clos
     expect(job?.status).toBe('failed') // Complete provider receipt, explicit out-of-scope input.
     expect(drained).toBe(true)
   } finally { exit.release(); for (const cleanup of cleanups) await cleanup(); importModelConfigSnapshot(snapshot); await rm(root, { recursive: true, force: true }) }
+})
+
+
+test.each([401,429,503])('intake %i failure persists and polls the original status and safe diagnostics without retry', async status => {
+  const root = await mkdtemp('/private/tmp/bgs-intake-drain-')
+  const snapshot = exportModelConfigSnapshot(), cleanups: Array<() => void | Promise<void>> = []
+  let calls = 0
+  const providerDiagnostics = {bodyStatus:'parsed' as const,code:'inference_failed',
+    requestId:'01a1aff8-b9b5-7b65-98c3-87411d962d3e',retryAfter:2}
+  try {
+    const model = createModelConfig('owner',{name:'Offline fixture',provider:'openai-compatible',apiKey:'synthetic',model:'fixture'})
+    const app = createAgentWorkflowApp({dashboardDataRoot:root,defaultWorkspacePath:root,modelConfigStore:false,
+      skillsConfig:false,workflowV3Store:false,currentUser:{id:'owner',role:'owner'},registerCleanup:fn=>cleanups.push(fn),
+      modelRuntimeHost:{async generate(){throw Error('Unexpected legacy call')},async generateWithUsage(){
+        calls++;throw new BeeGameModelRuntimeError(`Provider rejected (HTTP ${status})`,'model_request',{
+          httpStatus:status,failureCode:'upstream-http-error',diagnosticId:'worker-id',providerDiagnostics})
+      }}})
+    const response = await app.request('/api/beegame-intake/jobs',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({idea:'Offline fixture',modelConfigId:model.id})})
+    expect(response.status).toBe(202)
+    const {jobId} = await response.json() as {jobId:string}
+    let poll: any
+    for(let i=0;i<100;i++) {
+      poll = await (await app.request(`/api/beegame-intake/jobs/${jobId}`)).json()
+      if(poll.status!=='running') break
+      await new Promise(resolve=>setTimeout(resolve,5))
+    }
+    expect(poll).toMatchObject({status:'failed',errorStatus:status,errorDetails:{diagnosticId:'worker-id',
+      failureCode:'upstream-http-error',providerDiagnostics}})
+    await cleanups[0]!() // Detached job persistence completes during the existing drain.
+    const persisted = await loadBeeGameIntakeJob(getUserDashboardDataRoot(root,'owner'),jobId)
+    expect(persisted).toMatchObject({status:'failed',errorStatus:status,errorDetails:poll.errorDetails})
+    expect(calls).toBe(1)
+  } finally { for(const cleanup of cleanups) await cleanup(); importModelConfigSnapshot(snapshot);await rm(root,{recursive:true,force:true}) }
+})
+
+
+test('stopping during runtime preparation cancels that attempt and never starts a native runner',async()=>{
+  const root=await mkdtemp('/private/tmp/bgs-preparation-stop-')
+  const entered=gate();let starts=0,calls=0,observed:AbortSignal|undefined
+  const manager=new BeeGameSessionManager({async start(){starts++;throw Error('Cancelled preparation must not start a runner')}},root,
+    async(_data,_owner,_auth,_model,signal)=>{
+      calls++;observed=signal;entered.release()
+      return new Promise<Record<string,string>>((_resolve,reject)=>signal!.addEventListener('abort',()=>reject(signal!.reason),{once:true}))
+    })
+  try{
+    const session=manager.start({workspacePath:join(root,'game'),userId:'owner'})
+    await manager.send(session.id,'Fixture work');await entered.promise
+    manager.stop(session.id);await manager.waitForSessionIdle(session.id)
+    expect(observed?.aborted).toBe(true);expect(starts).toBe(0);expect(calls).toBe(1)
+  }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('status uses a compact reused index while retaining exact event counters and activity',async()=>{
+  const root=await mkdtemp('/private/tmp/bgs-runtime-index-')
+  const manager=new BeeGameSessionManager({async start(){return{stop(){},async submit(turn){
+    for(const type of ['assistant.partial','tool.progress','assistant.thinking'] as const)for(let i=0;i<100;i++)
+      await turn.onMessage({type:'runtime_event',runtime:'bgs',eventType:type,text:'fixture detail '+i})
+    await turn.onMessage({type:'runtime_event',runtime:'bgs',eventType:'tool.progress',text:'late observation',occurredAt:'2020-01-01T00:00:00Z'})
+    await turn.onMessage({type:'runtime_event',runtime:'bgs',eventType:'assistant.message',text:'Fixture complete'})
+  }}}},root,()=>({}))
+  try{
+    const session=manager.start({workspacePath:join(root,'game'),userId:'owner'})
+    await manager.send(session.id,'Fixture');await manager.waitForSessionIdle(session.id)
+    const original=manager.events(session.id),facts=manager.runtimeStateFacts(session.id)
+    expect(facts.counters).toEqual({eventCount:original.length,toolUseCount:original.filter(event=>event.type.startsWith('tool.')).length})
+    expect(facts.events.length).toBeLessThan(original.length/4)
+    expect(runtimeActivity(facts.events)).toEqual(runtimeActivity(original))
+    expect(manager.runtimeStateFacts(session.id).events).toBe(facts.events)
+    expect(original.filter(event=>event.type==='assistant.partial')).toHaveLength(100)
+  }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
 })

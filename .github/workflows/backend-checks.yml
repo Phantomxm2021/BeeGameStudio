@@ -7,7 +7,7 @@ on:
       - 'scripts/**'
       - 'supabase/**'
       - 'docker/**'
-      - '.beegame/skills/**'
+      - '.beegame/plugins/**'
       - 'vendor/bgs'
       - 'package.json'
       - 'bun.lock'
@@ -20,7 +20,7 @@ on:
       - 'scripts/**'
       - 'supabase/**'
       - 'docker/**'
-      - '.beegame/skills/**'
+      - '.beegame/plugins/**'
       - 'vendor/bgs'
       - 'package.json'
       - 'bun.lock'
@@ -47,7 +47,7 @@ jobs:
           node-version: '25.2.1'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.14'
+          bun-version: '1.4.3'
       - name: Install locked workspace dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check backend types

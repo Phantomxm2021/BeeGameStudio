@@ -9,7 +9,16 @@ import { CHATGPT_IMAGE_ENDPOINT, imageConfigSchema } from './config'
 import { ChatGPTSubscriptionImageProvider } from './chatgpt-provider'
 import { ImageAttemptStore } from './attempt'
 import { ImageGenerationService } from './service'
-import { openImageGenerationAccess } from './access'
+import { createImageGenerationAccess } from './access'
+
+function openImageGenerationAccess(input: Parameters<typeof createImageGenerationAccess>[0]) {
+  const access = createImageGenerationAccess(input)
+  const path='/'+crypto.randomUUID()+'/generate'
+  const server = Bun.serve({hostname:'127.0.0.1',port:0,idleTimeout:0,maxRequestBodySize:256*1024,
+    fetch:request=>new URL(request.url).pathname===path ? access.fetch(request) : new Response('Not found',{status:404})})
+  return {...access,endpoint:server.url.origin+path,close(){access.close();return server.stop(false)}}
+}
+
 import { loadPersonalImageConnection, savePersonalImageConnection } from './personal-connection'
 import { createAgentWorkflowApp } from '../app'
 

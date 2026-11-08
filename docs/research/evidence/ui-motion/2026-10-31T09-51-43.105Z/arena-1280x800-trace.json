@@ -1,0 +1,153 @@
+{
+  "trace": [
+    {
+      "at": 1793440321225,
+      "type": "click",
+      "name": "Begin"
+    },
+    {
+      "at": 1793440321359,
+      "type": "click",
+      "name": "Pause"
+    },
+    {
+      "at": 1793440322033,
+      "type": "click",
+      "name": "Resume"
+    },
+    {
+      "at": 1793440322035,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440322036,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440322036,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440322036,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440322459,
+      "type": "down",
+      "code": "Space"
+    },
+    {
+      "at": 1793440323243,
+      "type": "up",
+      "code": "Space"
+    },
+    {
+      "at": 1793440323637,
+      "type": "click",
+      "name": "Try again"
+    }
+  ],
+  "frames": [
+    {
+      "name": "title",
+      "file": "arena-1280x800-title.png",
+      "beforeCapture": {
+        "at": 260.5,
+        "state": "Ready",
+        "text": "Hull 3 / 3 · Rival 3 / 3",
+        "focus": "Begin",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 388.40000009536743
+    },
+    {
+      "name": "play",
+      "file": "arena-1280x800-play.png",
+      "beforeCapture": {
+        "at": 463.5,
+        "state": "Playing",
+        "text": "Hull 3 / 3 · Rival 3 / 3",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 521.5
+    },
+    {
+      "name": "pause-0",
+      "file": "arena-1280x800-pause-0.png",
+      "beforeCapture": {
+        "at": 524.7000002861023,
+        "state": "Paused",
+        "text": "Hull 3 / 3 · Rival 3 / 3",
+        "focus": "Resume",
+        "animations": [
+          {
+            "time": 0,
+            "state": "running",
+            "duration": 100
+          }
+        ],
+        "reduced": false
+      },
+      "afterCaptureAt": 668.0999999046326
+    },
+    {
+      "name": "pause-1",
+      "file": "arena-1280x800-pause-1.png",
+      "beforeCapture": {
+        "at": 723.7000002861023,
+        "state": "Paused",
+        "text": "Hull 3 / 3 · Rival 3 / 3",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 846.0999999046326
+    },
+    {
+      "name": "pause-2",
+      "file": "arena-1280x800-pause-2.png",
+      "beforeCapture": {
+        "at": 1069,
+        "state": "Paused",
+        "text": "Hull 3 / 3 · Rival 3 / 3",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 1196.7000002861023
+    },
+    {
+      "name": "rapid-return",
+      "file": "arena-1280x800-rapid-return.png",
+      "beforeCapture": {
+        "at": 1571.5999999046326,
+        "state": "Playing",
+        "text": "Hull 3 / 3 · Rival 3 / 3",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 1618
+    },
+    {
+      "name": "result",
+      "file": "arena-1280x800-result.png",
+      "beforeCapture": {
+        "at": 2659.4000000953674,
+        "state": "Won",
+        "text": "Hull 1 / 3 · Rival 0 / 3",
+        "focus": "Try again",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 2800.4000000953674
+    }
+  ]
+}

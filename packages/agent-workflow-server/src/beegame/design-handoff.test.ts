@@ -4,11 +4,10 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, rename, symlink } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkDesignHandoff, checkDesignHandoffDraft, designSupportingFiles, designDocumentVersion, designHandoffPath,
-  readDesignAcceptanceRequirements, designReviewIndexes,
+  readDesignAcceptanceRequirements,
   type DesignDocument } from './design-handoff'
 import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
 import { checkDesignDocumentReferences } from './design-document-references'
-import { readImplementationTask } from './workflow-read-tools'
 
 const digest = (body: string) => createHash('sha256').update(body).digest('hex')
 
@@ -23,14 +22,12 @@ test('readable GDD task pointers do not require retired Scene/UI registration', 
     await writeFile(path, body.replace(/\[[^\]]*\]\((\.\.\/content\/[^)]+)\)/g, '`$1`'))
   }
   expect(checkDesignHandoff(workspace, [...originals.keys()].map(path => path.split('/').at(-1) as DesignDocument)).valid).toBe(true)
-  expect(readImplementationTask(workspace,{}).directory.length).toBeGreaterThan(0)
   for (const [path, body] of originals) await writeFile(path, body)
-  expect(readImplementationTask(workspace,{}).directory.length).toBeGreaterThan(0)
   for (const source of ['ui/menu.json', 'scenes/level.json'])
     await writeFile(join(workspace, 'content', source.replace('.json', '-actual.json')), await readFile(join(workspace, 'content', source)))
   await writeFile(join(workspace, 'content/index.json'), JSON.stringify({ schema: 'beegame-content-package.v2',
     id: 'fixture', dimension: '2d', entryScene: 'level', files: ['ui/menu-actual.json', 'scenes/level-actual.json'] }))
-  expect(readImplementationTask(workspace,{}).valid).toBe(true)
+  expect(checkDesignHandoffDraft(workspace,'GDD.md').valid).toBe(true)
   expect(checkDesignHandoff(workspace,['GDD.md']).valid).toBe(true)
 }))
 
@@ -46,10 +43,8 @@ test.each(['absent','matching','mismatch','missing-header','duplicate-header','m
     expect(result.valid).toBe(kind==='absent'||kind==='matching')
     if(result.valid) {
       expect(readDesignAcceptanceRequirements(workspace)[0]?.id).toBe('rule')
-      expect(readImplementationTask(workspace,{}).valid).toBe(true)
     } else {
       expect(()=>readDesignAcceptanceRequirements(workspace)).toThrow()
-      expect(readImplementationTask(workspace,{}).valid).toBe(false)
     }
     expect(result.snapshots['GDD.md']).toMatch(/^[a-f0-9]{64}$/)
     if(kind==='matching')expect(result.documentVersions).toEqual({'GDD.md':'1.0'})
@@ -186,52 +181,8 @@ test('heading normalization includes task and retained-evidence pointers without
   }))
   expect(checkDesignHandoffDraft(workspace, name).valid).toBe(true)
   expect(checkDesignHandoff(workspace, [name]).issues).toEqual([])
-  expect(readImplementationTask(workspace,{id:'task'})).toMatchObject({valid:true,task:{id:'task',section:'2. Task',dependsOn:[],requirementRefs:[{document:name,id:'rule'}]}})
-  expect(designReviewIndexes(workspace,[name])[0]).toMatchObject({evidence:[{section:'3. Proof',path:'proof.json',source:'Synthetic retained fact',expected:3}]})
   await writeFile(join(workspace, 'proof.json'), '{"value":4}')
   expect(checkDesignHandoffDraft(workspace, name).valid).toBe(false)
-}))
-
-test('an explicit note-only index scope excludes unrelated outcomes and technical tasks', () => fixture(async workspace => {
-  const body = (await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).replace('# Design', '# GDD\n## Design')
-  await writeFile(join(workspace, 'docs/GDD.md'), body + '\n## Publication note\nA non-rule note.\n')
-  const scope = { 'GDD.md': ['Publication note'] }
-  const indexes = designReviewIndexes(workspace, ['GDD.md'], scope)
-  expect(indexes[0]).toMatchObject({ outputs: [] })
-  expect(designReviewIndexes(workspace, ['GDD.md'])[0]).toMatchObject({
-    implementationItems: designHandoffFixture('GDD.md').implementationItems,
-  })
-}))
-
-test('affected input retains exact task/source pointers but excludes unrelated tasks; moved headings fall back', () => fixture(async workspace => {
-  const tech = designHandoffFixture('GDD.md')
-  tech.outputs[0]!.section = 'Interface'
-  tech.outputs[0]!.acceptance!.section = 'Interface'
-  tech.implementationItems!.forEach(item => { item.section = 'Other tasks' })
-  tech.implementationItems![0]!.section = 'Changed task'
-  await writeDesignDocumentFixture(workspace, 'GDD.md', tech,
-    '# Technical\n- Version: v1.0\n## Interface\nContract\n## Changed task\nConsume rule\n## Other tasks\nUnchanged\n')
-  const selected = designReviewIndexes(workspace, ['GDD.md'], { 'GDD.md': ['Changed task'] })[0]!
-  expect(selected).toMatchObject({ implementationItems: [tech.implementationItems![0]!], outputs: [] })
-  expect(selected).toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 5, limit: 2 }] })
-  expect(designReviewIndexes(workspace, ['GDD.md'], { 'GDD.md': [] })[0]).toMatchObject({ sourceReads: [] })
-  for (const scope of [null, ['Missing heading']]) {
-    const fallback = designReviewIndexes(workspace, ['GDD.md'], { 'GDD.md': scope })[0]!
-    expect(fallback).toMatchObject({ implementationItems: tech.implementationItems, outputs: tech.outputs })
-    expect(fallback).toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 1, limit: 9 }] })
-  }
-}))
-
-test('source Read locations merge nested/adjacent ranges and refresh from the resulting original file', () => fixture(async workspace => {
-  const path = join(workspace, 'docs/GDD.md')
-  const body = '# Design\r\n- Version: v1.0\r\nIntro\r\n## Rules\r\nMove.\r\n### Input\r\nPress.\r\n## Feedback\r\nFlash.\r\n## Unrelated\r\nNotes.'
-  await writeFile(path, body)
-  const scope = { 'GDD.md': ['Rules', 'Input', 'Feedback'] }
-  expect(designReviewIndexes(workspace, ['GDD.md'], scope)[0])
-    .toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 4, limit: 6 }] })
-  await writeFile(path, body.replace('Intro', 'Intro\r\nNew intro.'))
-  expect(designReviewIndexes(workspace, ['GDD.md'], scope)[0])
-    .toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 5, limit: 6 }] })
 }))
 
 test('owned draft checking validates GDD task references without later delivery', () => fixture(async (workspace, put) => {

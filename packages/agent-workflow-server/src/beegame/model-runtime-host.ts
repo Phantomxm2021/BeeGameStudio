@@ -1,4 +1,5 @@
 import {providerConfig} from '../model-providers/config'
+import type { ProviderHttpErrorDiagnostics } from '../model-providers/http-error'
 import { withBgsAccountUse } from '../bgs/account-activity'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
@@ -73,10 +74,11 @@ export class BeeGameModelRuntimeError extends Error {
   readonly diagnosticId?: string
   readonly httpStatus?: number
   readonly networkCode?: string
+  readonly providerDiagnostics?: Readonly<ProviderHttpErrorDiagnostics>
   constructor(
     message: string,
     readonly stage: BeeGameModelRuntimeFailureStage,
-    options?: { cause?: unknown; usage?: BeeGameModelUsage; failureCode?: BeeGameModelRuntimeFailureCode; diagnosticId?: string; httpStatus?: number; networkCode?: string },
+    options?: { cause?: unknown; usage?: BeeGameModelUsage; failureCode?: BeeGameModelRuntimeFailureCode; diagnosticId?: string; httpStatus?: number; networkCode?: string; providerDiagnostics?: Readonly<ProviderHttpErrorDiagnostics> },
   ) {
     super(message, options)
     this.name = 'BeeGameModelRuntimeError'
@@ -85,6 +87,7 @@ export class BeeGameModelRuntimeError extends Error {
     this.diagnosticId = options?.diagnosticId
     this.httpStatus = options?.httpStatus
     this.networkCode = options?.networkCode
+    this.providerDiagnostics = options?.providerDiagnostics
   }
 }
 
@@ -126,6 +129,7 @@ export type ModelRuntimeWorkerResponse =
       failureCode: BeeGameModelRuntimeFailureCode
       httpStatus?: number
       networkCode?: string
+      providerDiagnostics?: Readonly<ProviderHttpErrorDiagnostics>
     }
 
 const WORKER_PATH = fileURLToPath(
@@ -240,7 +244,11 @@ async function runWorker(
             ...(message.usage ? { usage: message.usage } : {}),
           })
         } else {
-          reject(new BeeGameModelRuntimeError(message.message, message.stage, { usage: message.usage, failureCode: message.failureCode, diagnosticId: requestId, httpStatus: message.httpStatus, networkCode: message.networkCode }))
+          console.warn('[model-runtime]', { diagnosticId: requestId, querySource: input.querySource,
+            failureCode: message.failureCode, httpStatus: message.httpStatus,
+            providerDiagnostics: message.providerDiagnostics,
+            ...(message.failureCode === 'structured-output-missing' ? {responseSummary:message.message} : {}) })
+          reject(new BeeGameModelRuntimeError(message.message, message.stage, { usage: message.usage, failureCode: message.failureCode, diagnosticId: requestId, httpStatus: message.httpStatus, networkCode: message.networkCode, providerDiagnostics: message.providerDiagnostics }))
         }
       },
     })

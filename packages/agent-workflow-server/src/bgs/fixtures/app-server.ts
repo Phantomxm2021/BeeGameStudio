@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 // Offline runtime metadata export uses the same configured executable as stdio.
 if (process.argv.slice(-3).join(' ') === 'debug models --bundled') {
-  process.stdout.write(JSON.stringify({models:[{slug:'fixture-known-model',display_name:'Fixture',context_window:272000}]}))
+  process.stdout.write(JSON.stringify({models:[{slug:'fixture-known-model',display_name:'Fixture',context_window:272000,model_messages:{instructions_template:'Fixture identity.\n# Using skills\nOTHER_MODEL_SKILL_USAGE_FIXTURE\n# Other instructions\nNot part of the Skill chapter.'}},{slug:'gpt-5.6-sol',model_messages:{instructions_template:'GPT-5.6 fixture identity.\n# Using skills\nOFFICIAL_SKILL_USAGE_FIXTURE\n# Other instructions\nNot part of the Skill chapter.'}}]}))
   process.exit(0)
 }
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n')
 const threadId = '019a0000-0000-7000-8000-000000000001'
-let skillRoots: string[] = []
+let pluginRoot = ''
+let pluginInstalled = false
 const serverResponses: any[] = []
 let turn = 0
 let resumed = false
@@ -150,16 +151,22 @@ createInterface({ input: process.stdin }).on('line', async line => {
     if (nativeGoal.status === 'active') void runNativeGoal()
   }
   else if (request.method === 'thread/backgroundTerminals/clean') reply({})
-  else if (request.method === 'skills/extraRoots/set') { skillRoots = p.extraRoots; reply({}) }
-  else if (request.method === 'skills/list') {
+  else if (request.method === 'config/read') reply({config:{},origins:{},layers:null})
+  else if (request.method === 'marketplace/add') { pluginRoot = p.source; reply({marketplaceName:'bgs-professional',installedRoot:p.source,alreadyAdded:false}) }
+  else if (request.method === 'plugin/install') { pluginInstalled = true; reply({authPolicy:'ON_USE',appsNeedingAuth:[]}) }
+  else if (request.method === 'plugin/read' || request.method === 'skills/list') {
     const skills=[]
-    for(const directory of skillRoots) for(const entry of await readdir(directory,{withFileTypes:true}).catch((error: NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return [];throw error})) {
+    const pluginCatalog = pluginRoot
+    const roots = request.method === 'plugin/read' ? (pluginInstalled ? [pluginCatalog] : [])
+      : [pluginCatalog, join(process.env.BGS_HOME!, 'skills')]
+    for(const directory of roots) for(const entry of await readdir(directory,{withFileTypes:true}).catch((error: NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return [];throw error})) {
       if(!entry.isDirectory())continue
       const path=join(directory,entry.name,'SKILL.md'),body=await readFile(path,'utf8').catch((error: NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return '';throw error})
       const skill=/^name: (.+)$/m.exec(body)?.[1]
-      if(skill)skills.push({name:skill,path,enabled:true})
+      if(skill)skills.push({name:directory===pluginCatalog?'bgs-game-development:'+skill:skill,path,enabled:true})
     }
-    reply({data:[{skills,errors:process.env.BGS_FIXTURE_SKILL_CATALOG_ERROR === '1'
+    if (request.method === 'plugin/read') reply({plugin:{summary:{installed:pluginInstalled,enabled:pluginInstalled},skills}})
+    else reply({data:[{skills,errors:process.env.BGS_FIXTURE_SKILL_CATALOG_ERROR === '1'
       ? [{path:'PRIVATE_BROKEN_SKILL_PATH',message:'PRIVATE_INVALID_SKILL_METADATA'}] : []}]})
   }
   else if (request.method === 'turn/start') {
@@ -170,7 +177,6 @@ createInterface({ input: process.stdin }).on('line', async line => {
     if (process.env.BGS_FIXTURE_DESIGN_REVIEW === 'manual') return
     const prompt = p.input?.findLast((i: any) => i.type === 'text')?.text ?? ''
     await new Promise(resolve => setTimeout(resolve, 5))
-    if (prompt?.startsWith('$')) { event('item/completed',{item:{id:'skill-answer',type:'agentMessage',text:p.input.some((i:any)=>i.type==='skill')?'Native skill selected':'Skill input missing'}}) }
     if (prompt === 'native-retry') event('error', { error: { message: 'Temporary native failure' }, willRetry: true })
     if (prompt === 'hang') { setInterval(() => {}, 1000); return }
     if (prompt === 'crash') { process.exit(3) }

@@ -92,6 +92,7 @@ it('keeps context visibility honest when the runtime snapshot is unavailable', a
   })
   const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  let eventSpy: { mockRestore(): void } | undefined
   let snapshotSpy: { mockRestore(): void } | undefined
   try {
     expect((await post('/api/projects', { id: projectId, name: 'Context visibility test', root_path: workspace,
@@ -112,6 +113,9 @@ it('keeps context visibility honest when the runtime snapshot is unavailable', a
     }
     expect(baseline.context?.token_budget?.total_tokens).toBe(100)
 
+    eventSpy = spyOn(BeeGameSessionManager.prototype, 'events').mockImplementation(() => {
+      throw new Error('Runtime status must not format the full Chat')
+    })
     snapshotSpy = spyOn(BeeGameSessionManager.prototype, 'runtimeSnapshot').mockImplementation(() => {
       throw new Error('fixture snapshot unavailable')
     })
@@ -124,6 +128,7 @@ it('keeps context visibility honest when the runtime snapshot is unavailable', a
       } },
     })
   } finally {
+    eventSpy?.mockRestore()
     snapshotSpy?.mockRestore()
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
   }

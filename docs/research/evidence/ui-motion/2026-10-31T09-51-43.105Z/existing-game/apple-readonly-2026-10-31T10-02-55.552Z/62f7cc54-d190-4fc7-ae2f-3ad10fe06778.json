@@ -1,0 +1,76 @@
+{
+  "id": "62f7cc54-d190-4fc7-ae2f-3ad10fe06778",
+  "label": "apple-existing-build-readonly",
+  "conditions": {
+    "source": "agent-declared",
+    "text": "Unmodified existing dist; 1280x720 headless; ordinary inputs; no state injection or new build"
+  },
+  "preview": {
+    "mode": "existing-build",
+    "project": "apple-catch-audited"
+  },
+  "observedEnvironment": {
+    "status": "observed",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "devicePixelRatio": 1,
+    "maxTouchPoints": 0,
+    "coarsePointer": false,
+    "hover": true
+  },
+  "targetId": "D55751E510B46041CEC15410F2638E1B",
+  "startedAt": "2026-10-31T10:02:55.730Z",
+  "endedAt": "2026-10-31T10:03:04.495Z",
+  "durationMs": 8764,
+  "status": "finished",
+  "endReason": "inspection-finished",
+  "observationStatus": "finished",
+  "gameplayVerdict": "not-evaluated",
+  "droppedEvents": 0,
+  "truncatedEvents": 0,
+  "counts": {
+    "observer.started": 1,
+    "navigation": 1,
+    "console.log": 1
+  },
+  "events": [
+    {
+      "at": "2026-10-31T10:02:55.732Z",
+      "type": "observer.started",
+      "targetId": "D55751E510B46041CEC15410F2638E1B",
+      "detail": {
+        "url": "about:",
+        "earlierConsoleHistoryExcluded": true
+      }
+    },
+    {
+      "at": "2026-10-31T10:02:55.734Z",
+      "type": "navigation",
+      "targetId": "D55751E510B46041CEC15410F2638E1B",
+      "detail": {
+        "url": "http://127.0.0.1:58517/"
+      }
+    },
+    {
+      "at": "2026-10-31T10:02:55.943Z",
+      "type": "console.log",
+      "targetId": "D55751E510B46041CEC15410F2638E1B",
+      "detail": [
+        "%c %c %c %c %c Phaser v3.90.0 (WebGL | Web Audio) %c https://phaser.io/v390",
+        "background: #ff0000",
+        "background: #ffff00",
+        "background: #00ff00",
+        "background: #00ffff",
+        "color: #ffffff; background: #000000",
+        "background: transparent"
+      ]
+    }
+  ],
+  "files": {
+    "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/backups/ui-motion-research-20261031/apple-readonly-2026-10-31T10-02-55.552Z/62f7cc54-d190-4fc7-ae2f-3ad10fe06778.json",
+    "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/backups/ui-motion-research-20261031/apple-readonly-2026-10-31T10-02-55.552Z/62f7cc54-d190-4fc7-ae2f-3ad10fe06778.png"
+  },
+  "screenshotAvailable": true
+}

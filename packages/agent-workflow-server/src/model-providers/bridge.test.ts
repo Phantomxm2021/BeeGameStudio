@@ -498,3 +498,44 @@ test('a real upstream Responses 413 retains its status and body without bridge r
     expect(requests).toBe(1)
   }finally{await bridge.close();upstream.stop(true)}
 })
+
+for(const mode of ['recovered','conflict','genuine-empty'] as const)
+test('Responses bridge handles '+mode+' without an automatic paid resubmission',async()=>{
+  let requests=0
+  const receipts:unknown[]=[]
+  const args='{"url":"https://fixture.invalid/current"}'
+  const item={type:'function_call',id:'item',call_id:'call',name:'navigate',namespace:'browser',status:'completed',arguments:''}
+  const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET')return new Response(null,{status:404})
+    requests++
+    const events=[{type:'response.output_item.added',item:{...item,status:'in_progress'}},
+      ...(mode==='genuine-empty'?[]:[{type:'response.function_call_arguments.done',item_id:item.id,arguments:args}]),
+      {type:'response.output_item.done',item},
+      {type:'response.completed',response:{id:'receipt',status:'completed',output:[{...item,arguments:mode==='conflict'?'{"url":"https://fixture.invalid/different"}':''}],
+        usage:{input_tokens:10,output_tokens:2,total_tokens:12}}}]
+    return new Response(events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}})
+  }})
+  const bridge=await startProviderBridge({OPENAI_API_KEY:'local-only',OPENAI_BASE_URL:upstream.url.origin,BEEGAME_MODEL:'fixture'},
+    {onUsage:usage=>receipts.push(usage),resolveOutboundTarget:async value=>({url:new URL(value),addresses:['127.0.0.1'],lookup:(_host,_options,callback)=>callback(null,'127.0.0.1',4)})})
+  const send=()=>fetch(bridge.baseUrl+'/responses',{method:'POST',headers:{authorization:'Bearer '+bridge.apiKey},
+    body:JSON.stringify({stream:true,max_output_tokens:100,tools:[{type:'namespace',name:'browser',tools:[{type:'function',name:'navigate',parameters:{type:'object',properties:{url:{type:'string'}},required:['url']}}]}]})})
+  try{
+    if(mode==='conflict'){
+      await expect((async()=>{const first=await send();await first.text()})()).rejects.toThrow()
+      const retry=await send(), body=await retry.json()
+      expect(retry.status).toBe(400)
+      expect(body.error.code).toBe('provider_tool_arguments')
+      expect(body.error.message).toContain('conflicting function-call arguments')
+      expect(body.error.message).not.toContain('fixture.invalid')
+      expect(requests).toBe(1)
+      expect(receipts).toHaveLength(1)
+    }else{
+      for(const response of [await send(),await send()]){
+        const events=await Array.fromAsync(parseSse(response))
+        expect(events.find(event=>event.type==='response.output_item.done')!.item.arguments).toBe(mode==='recovered'?args:'{}')
+      }
+      expect(requests).toBe(2)
+      expect(receipts).toHaveLength(2)
+    }
+  }finally{await bridge.close();upstream.stop(true)}
+})

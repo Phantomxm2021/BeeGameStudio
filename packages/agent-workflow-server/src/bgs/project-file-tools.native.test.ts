@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -5,7 +6,8 @@ import { createBgsRunner } from './runner'
 
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 localTest.each([false, true])('ordinary and protected document tools run through the native entry (code-mode=%s)', async codeMode => {
-  const root = await mkdtemp('/private/tmp/bgs-native-file-route-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-native-file-route-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(join(game, 'docs'), {recursive: true})
   await mkdir(join(catalog, 'fixture'), {recursive: true})
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline test.\n---\nFixture.')
@@ -43,7 +45,7 @@ localTest.each([false, true])('ordinary and protected document tools run through
   let runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
     runtime = await runner.start({sessionId: 'file-route-fixture', cwd: game,
-      env: {BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+      env: {BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
         OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: codeMode ? 'gpt-6.1-sol' : 'unknown-fixture-model'},
       requestPermission: async request => ({behavior: request.toolName === 'Write' ? 'allow' : 'deny'}),
     })

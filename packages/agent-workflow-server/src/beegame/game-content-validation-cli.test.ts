@@ -12,7 +12,7 @@ import type { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspec
 import { sceneUiContentFormat } from './scene-ui-content-authoring'
 import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
 import { CONTENT_CONSUMER_API } from './game-content-consumer-cli'
-import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
+import { CONTENT_CHECKER_ENTRY } from './game-content-validation-cli'
 import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 
 test('camera draft accepts the actual Scene envelope and standalone Camera; diagnoses the selected source without writes',()=>{
@@ -234,7 +234,7 @@ test('materialized Review geometry command fails saved errors and passes correct
   writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[Level](../content/scenes/level.json)\n')
   mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
   writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
-  const runtime = await sharedContentChecker()
+  const runtime = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
   for (const [height, valid] of [[28, false], [52, true]] as const) {
     const path = join(root, 'content/ui/menu.json'), source = JSON.stringify(uiLayoutFixture(height))
     writeFileSync(path, source)
@@ -334,7 +334,7 @@ test('format entry reads one actual contract section without full Content or res
       values: { coordinates: format.coordinates, runtimeConsumption: format.runtimeConsumption } })
   expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'missing'])).toThrow()
   expect(readFileSync(path, 'utf8')).toBe(before)
-  const runtime = await sharedContentChecker()
+  const runtime = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
   const single = runGameContentCommand(root, ['--format', 'uiDocument']) as any
   const batch = runGameContentCommand(root, ['--format', 'uiDocument', 'uiVocabulary']) as any
   expect(single.values.uiDocument).toEqual(batch.values.uiDocument)
@@ -498,7 +498,7 @@ test('design appendix comes from actual shared geometry, preserves sources and n
   expect(readFileSync(path, 'utf8')).toBe(original)
   mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
   writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
-  const runtime = await sharedContentChecker()
+  const runtime = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
   const child = Bun.spawn([process.execPath, join(root,'.beegame/delivery/check-content.mjs'), ...args, '--appendix'],
     { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
   expect(await new Response(child.stdout).text()).toBe(appendix + '\n')
@@ -558,7 +558,7 @@ test('layout CLI offers the appendix without changing default or detailed JSON o
   const path = join(root, 'content/ui/menu.json'), bytes = JSON.stringify(uiLayoutFixture(28))
   writeFileSync(path, bytes)
   const indexBytes = readFileSync(join(root, 'content/index.json'), 'utf8')
-  const checker = await sharedContentChecker()
+  const checker = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
   const entry = join(root, 'check-content.mjs')
   writeFileSync(entry, CONTENT_CHECKER_ENTRY)
   const args = ['--layout', 'ui/menu.json', '960', '540']
@@ -607,7 +607,7 @@ test('large detailed layout JSON survives a slow stdout pipe including failed ch
     id: 'decor-' + i, role: 'container', parentId: 'root', layout: { size: [10, 10] },
   })))
   writeFileSync(join(root, 'content/ui/menu.json'), JSON.stringify(source))
-  const runtime = await sharedContentChecker()
+  const runtime = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
   const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'),
     '--design-layouts', '--draft', '--details'], {
     cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe',
@@ -895,7 +895,7 @@ test('large scenes have a compact node index and exact node access without rewri
 
 test('missing CLI inputs still identify the actual workspace and missing source', async () => {
   const root=mkdtempSync(join(tmpdir(),'bgs-missing-check-input-'));roots.push(root)
-  const checker=await sharedContentChecker()
+  const checker={ moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
   const entry=join(root,'check-content.mjs');writeFileSync(entry,CONTENT_CHECKER_ENTRY)
   const child=Bun.spawn([process.execPath,entry,root,'--layout-draft','content/ui/missing.json','640','360'],
     {env:{...process.env,BEEGAME_CONTENT_CHECKER_MODULE:checker.moduleUrl},stdout:'pipe',stderr:'pipe'})

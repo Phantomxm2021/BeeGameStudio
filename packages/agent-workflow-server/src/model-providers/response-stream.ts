@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isDeepStrictEqual } from 'node:util'
 import type { ProviderConfig } from './config'
 import {
   opaqueReasoning,
@@ -27,6 +28,7 @@ export type ProviderUsage = {
 const MAX_EVENT_SIZE = 64 * 1024 * 1024
 
 export class ProviderSseError extends Error {}
+export class ProviderToolArgumentsError extends ProviderSseError {}
 
 // The native bridge observes receipt boundaries before forwarding each chunk.
 // Share the existing bounded SSE decoder instead of a second protocol parser.
@@ -207,10 +209,10 @@ function nativeReceiptUsage(event: unknown): ProviderUsage | undefined {
     ...(reasoning === undefined ? {} : { reasoning_tokens: reasoning }) }
 }
 
-/** Preserve native Responses data; only the known empty exec explanation changes.
+/** Preserve native Responses data while adapting declared tool identities and schema-safe argument spellings.
  * Completed receipts are recorded before enqueue; missing or cancelled receipts remain incomplete. */
 export async function nativeResponses(response: Response, request: Json,
-  onUsage?: (usage: ProviderUsage) => void): Promise<Response> {
+  onUsage?: (usage: ProviderUsage) => void, onToolArgumentsError?: (message: string) => void): Promise<Response> {
   if (!response.ok) return response
   let reported = false
   const observe = (event: unknown) => {
@@ -225,14 +227,41 @@ export async function nativeResponses(response: Response, request: Json,
         cache_creation_tokens: 0, total_tokens: 0, incomplete: true })
     }
   }
-  const normalize = (request.tools ?? []).some((tool: Json) =>
-    tool.type === 'function' && tool.name === 'exec_command' ||
-    tool.type === 'namespace' && tool.name === 'functions' &&
-      tool.tools.some((child: Json) => child.type === 'function' && child.name === 'exec_command'))
-  const item = (value: Json): Json => value?.type === 'function_call' && typeof value.arguments === 'string'
-    ? { ...value, arguments: normalizeNativeToolArguments(value.name, value.namespace, value.arguments) } : value
+  const definitions: Json[] = request.tools ?? []
+  const directNames = new Set(definitions.filter(tool => tool.type !== 'namespace').map(tool => tool.name))
+  type NativeTool = Pick<MappedTool, 'name' | 'namespace'> & { schema?: Json }
+  const identities = new Map<string, NativeTool>()
+  const returnedNames = new Map<string, NativeTool | null>()
+  const key = (name: string, namespace?: string) => JSON.stringify([namespace ?? null, name])
+  const register = (name: string, tool: NativeTool) =>
+    returnedNames.set(name, returnedNames.has(name) ? null : tool)
+  for (const tool of definitions) {
+    if (tool.type === 'function') {
+      identities.set(key(tool.name), { name: tool.name, schema: tool.parameters })
+      continue
+    }
+    if (tool.type !== 'namespace') continue
+    for (const child of tool.tools ?? []) {
+      if (child.type !== 'function') continue
+      const declared = { name: child.name, namespace: tool.name, schema: child.parameters }
+      identities.set(key(child.name, tool.name), declared)
+      // A provider can return either a qualified or bare name. Resolve only a
+      // unique declaration in this request; literal top-level names take priority.
+      register(tool.name + '.' + child.name, declared)
+      register(child.name, declared)
+    }
+  }
+  const normalize = identities.size > 0
+  const item = (value: Json, complete = true): Json => {
+    if (value?.type !== 'function_call') return value
+    const declared = value.namespace == null && !directNames.has(value.name) ? returnedNames.get(value.name) : undefined
+    const call = declared ? { ...value, name: declared.name, namespace: declared.namespace } : value
+    return complete && typeof call.arguments === 'string'
+      ? { ...call, arguments: normalizeNativeToolArguments(call.name, call.namespace, call.arguments,
+          identities.get(key(call.name, call.namespace))?.schema) } : call
+  }
   const output = (value: Json): Json => normalize && Array.isArray(value?.output)
-    ? { ...value, output: value.output.map(item) } : value
+    ? { ...value, output: value.output.map((entry: Json) => item(entry)) } : value
   const headers = new Headers(response.headers)
   for (const name of ['content-length', 'content-encoding', 'connection', 'transfer-encoding']) headers.delete(name)
   if (!response.body) { missing(); return response }
@@ -244,16 +273,112 @@ export async function nativeResponses(response: Response, request: Json,
     } finally { missing() }
   }
   const reader = response.body.getReader(), parser = new ProviderSseParser(), encoder = new TextEncoder()
-  const calls = new Map<string, Pick<MappedTool, 'name' | 'namespace'>>()
-  let observing = true, doneSent = false
-  const event = (value: Json): Json => {
-    if (value?.type === 'response.output_item.added' || value?.type === 'response.output_item.done') {
-      if (value.item?.type === 'function_call') calls.set(value.item.id, { name: value.item.name, namespace: value.item.namespace })
-      return { ...value, item: item(value.item) }
+  type StreamCall = NativeTool & { callId: string; snapshot?: string; delta: string; deltaBytes: number }
+  // One response only. Never source parameters from replayed input or another call.
+  const calls = new Map<string, StreamCall>()
+  const callItems = new Map<string, string>()
+  const emptyArguments = (value: unknown) => value === undefined || typeof value === 'string' && !value.trim()
+  const objectArguments = (value: string) => {
+    try { const parsed = JSON.parse(value); return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) }
+    catch { return false }
+  }
+  const sameArguments = (left: string, right: string) => {
+    if (left === right) return true
+    // Compare values without rewriting their original text. JS parsing loses
+    // large-integer precision, so those snapshots must agree byte-for-byte.
+    const exactNumbers = (value: unknown): boolean => typeof value === 'number'
+      ? !Number.isInteger(value) || Number.isSafeInteger(value)
+      : value !== null && typeof value === 'object' ? Object.values(value).every(exactNumbers) : true
+    try {
+      const a = JSON.parse(left), b = JSON.parse(right)
+      return exactNumbers(a) && exactNumbers(b) && isDeepStrictEqual(a, b)
+    } catch { return false }
+  }
+  const snapshot = (call: StreamCall, args: unknown) => {
+    if (typeof args !== 'string' || !args.trim()) return
+    if (call.snapshot !== undefined && !sameArguments(call.snapshot, args))
+      throw new ProviderToolArgumentsError('Provider returned conflicting function-call arguments')
+    call.snapshot = args
+  }
+  const checkDelta = (call: StreamCall) => {
+    if (call.snapshot !== undefined && objectArguments(call.delta) && !sameArguments(call.delta, call.snapshot))
+      throw new ProviderToolArgumentsError('Provider returned conflicting function-call arguments')
+  }
+  const rememberItem = (value: Json, complete: boolean) => {
+    const normalized = item(value, false)
+    if (normalized?.type !== 'function_call' || typeof normalized.id !== 'string' || typeof normalized.call_id !== 'string') return
+    let call = calls.get(normalized.id)
+    if (call && (call.callId !== normalized.call_id || key(call.name, call.namespace) !== key(normalized.name, normalized.namespace)))
+      throw new ProviderToolArgumentsError('Provider changed a function-call identity')
+    const declared = identities.get(key(normalized.name, normalized.namespace))
+    if (!declared) return
+    if (!call) {
+      if (callItems.has(normalized.call_id) && callItems.get(normalized.call_id) !== normalized.id)
+        throw new ProviderToolArgumentsError('Provider changed a function-call identity')
+      callItems.set(normalized.call_id, normalized.id)
+      const delta = !complete && typeof normalized.arguments === 'string' ? normalized.arguments : ''
+      call = { ...declared, callId: normalized.call_id, delta, deltaBytes: Buffer.byteLength(delta) }
+      calls.set(normalized.id, call)
     }
-    if (value?.type === 'response.function_call_arguments.done' && calls.has(value.item_id) && typeof value.arguments === 'string')
-      return { ...value, arguments: normalizeNativeToolArguments(calls.get(value.item_id)!.name, calls.get(value.item_id)!.namespace, value.arguments) }
-    return value?.response ? { ...value, response: output(value.response) } : value
+    if (complete) { snapshot(call, normalized.arguments); checkDelta(call) }
+  }
+  const remember = (value: Json) => {
+    if (value?.type === 'response.output_item.added' || value?.type === 'response.output_item.done')
+      rememberItem(value.item, value.type === 'response.output_item.done')
+    if (value?.type === 'response.function_call_arguments.delta' || value?.type === 'response.function_call_arguments.done') {
+      const call = calls.get(value.item_id)
+      if (call) {
+        if (value.call_id !== undefined && value.call_id !== call.callId)
+          throw new ProviderToolArgumentsError('Provider changed a function-call identity')
+        if (value.type === 'response.function_call_arguments.done') snapshot(call, value.arguments)
+        else if (typeof value.delta === 'string') {
+          call.deltaBytes += Buffer.byteLength(value.delta)
+          if (call.deltaBytes > MAX_EVENT_SIZE) throw new ProviderToolArgumentsError('Provider function-call arguments exceed the size limit')
+          call.delta += value.delta
+        }
+      }
+    }
+    if (value?.type === 'response.completed' && Array.isArray(value.response?.output))
+      for (const entry of value.response.output) rememberItem(entry, true)
+  }
+  const completedItem = (value: Json): Json => {
+    const normalized = item(value, false), call = normalized?.type === 'function_call' ? calls.get(normalized.id) : undefined
+    if (!call || !emptyArguments(normalized.arguments)) return item(value)
+    const args = call.snapshot ?? call.delta
+    if (!args.trim()) return item(value) // Real missing fields stay missing for native/MCP validation.
+    if (!objectArguments(args)) throw new ProviderToolArgumentsError('Provider returned incomplete function-call arguments')
+    return item({ ...normalized, arguments: args })
+  }
+  const event = (value: Json, recover = true): Json => {
+    if (value?.type === 'response.output_item.added') return { ...value, item: item(value.item, false) }
+    if (value?.type === 'response.output_item.done') return { ...value, item: recover ? completedItem(value.item) : item(value.item) }
+    if (value?.type === 'response.function_call_arguments.done' && calls.has(value.item_id) && typeof value.arguments === 'string') {
+      const call = calls.get(value.item_id)!
+      return { ...value, arguments: normalizeNativeToolArguments(call.name, call.namespace, value.arguments, call.schema) }
+    }
+    return recover && value?.type === 'response.completed' && Array.isArray(value.response?.output)
+      ? { ...value, response: { ...value.response, output: value.response.output.map(completedItem) } }
+      : value?.response ? { ...value, response: output(value.response) } : value
+  }
+  let observing = true, doneSent = false, pending: Json[] | undefined, pendingBytes = 0
+  const encodeEvent = (value: Json) => 'data: ' + JSON.stringify(value) + '\n\n'
+  const forward = (value: Json): string => {
+    remember(value)
+    // Native executes output_item.done. Hold empty declared completions and their
+    // tail until terminal snapshots agree, preserving event order and cancellation.
+    if (pending || value?.type === 'response.output_item.done' && calls.has(value.item?.id) && emptyArguments(value.item.arguments)) {
+      pending ??= []
+      pendingBytes += Buffer.byteLength(JSON.stringify(value))
+      if (pendingBytes > MAX_EVENT_SIZE) throw new ProviderToolArgumentsError('Provider pending function-call events exceed the size limit')
+      pending.push(value)
+      if (!['response.completed', 'response.incomplete', 'response.failed'].includes(value.type)) return ''
+      const complete = value.type === 'response.completed' && !['incomplete', 'failed'].includes(value.response?.status)
+      const result = pending.filter(entry => complete || entry.type !== 'response.output_item.done' || entry.item?.type !== 'function_call')
+        .map(entry => encodeEvent(event(entry, complete))).join('')
+      pending = undefined; pendingBytes = 0
+      return result
+    }
+    return encodeEvent(event(value))
   }
   return new Response(new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -262,15 +387,21 @@ export async function nativeResponses(response: Response, request: Json,
         // reading within this pull; returning empty can stall a pending read.
         while (true) {
           const chunk = await reader.read()
-          if (chunk.done) { missing(); controller.close(); return }
+          if (chunk.done) {
+            if (pending) throw new ProviderToolArgumentsError('Provider stream ended before pending function calls completed')
+            missing(); controller.close(); return
+          }
           let forwarded = ''
           if (observing) {
             try {
               for (const value of parser.feed(chunk.value)) {
                 observe(value)
-                if (normalize) forwarded += 'data: ' + JSON.stringify(event(value)) + '\n\n'
+                if (normalize) forwarded += forward(value)
               }
-              if (normalize && parser.done && !doneSent) { forwarded += 'data: [DONE]\n\n'; doneSent = true }
+              if (normalize && parser.done && !doneSent) {
+                if (pending) throw new ProviderToolArgumentsError('Provider stream ended before pending function calls completed')
+                forwarded += 'data: [DONE]\n\n'; doneSent = true
+              }
             } catch (error) {
               if (!(error instanceof ProviderSseError) || normalize) throw error
               // Ordinary Responses stays byte-transparent even for malformed input.
@@ -281,9 +412,13 @@ export async function nativeResponses(response: Response, request: Json,
           if (!normalize) { controller.enqueue(chunk.value); return }
           if (forwarded) { controller.enqueue(encoder.encode(forwarded)); return }
         }
-      } catch (error) { missing(); await reader.cancel(error).catch(() => {}); controller.error(error) }
+      } catch (error) {
+        if (error instanceof ProviderToolArgumentsError) onToolArgumentsError?.(error.message)
+        pending = undefined; calls.clear(); callItems.clear(); missing()
+        await reader.cancel(error).catch(() => {}); controller.error(error)
+      }
     },
-    async cancel() { missing(); await reader.cancel() },
+    async cancel() { pending = undefined; calls.clear(); callItems.clear(); missing(); await reader.cancel() },
   }), { status: response.status, headers })
 }
 

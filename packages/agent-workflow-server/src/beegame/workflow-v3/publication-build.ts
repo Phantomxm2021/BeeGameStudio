@@ -5,7 +5,7 @@ import { dirname, join, relative } from 'node:path'
 import { projectPathSchema, WorkflowError, type Run } from './state'
 import { copyBuildDependencies, prepareBuildCaches, AGENT_SOURCE_EXCLUSIONS } from './editable-project'
 import { commandCheck, isProjectSourcePath } from './checks'
-import { artifactDigest } from '../runtime-acceptance'
+import { readArtifactSnapshot } from '../runtime-acceptance'
 import { runArtifactCheck, staticArtifactFiles } from './runtime-checks'
 import { publicationBuildArgs, type PreparedPublication } from '../deployment-manager'
 
@@ -45,13 +45,11 @@ export async function rebuildPublication(run: Run, plan: { runtimeArtifact: stri
     if(!files.includes(artifact+'/index.html'))throw new Error('Publication build failed: static artifact has no index.html')
     await mkdir(dirname(join(directory,artifact)),{recursive:true})
     await cp(join(temporary,artifact),join(directory,artifact),{recursive:true,dereference:false,verbatimSymlinks:true,mode:constants.COPYFILE_FICLONE})
-    await staticArtifactFiles(directory,artifact)
-    const proof={path:artifact,sha256:await artifactDigest(directory,artifact,true)}
+    const proof={path:artifact,sha256:(await readArtifactSnapshot(directory,artifact)).sha256}
     const build={id:'build',status:'passed',observation,artifacts:[proof]}
     const validate=async()=>{
       await validateRun()
-      await staticArtifactFiles(directory,artifact)
-      if(await artifactDigest(directory,artifact,true)!==proof.sha256)
+      if((await readArtifactSnapshot(directory,artifact)).sha256!==proof.sha256)
         throw new WorkflowError('publication-artifact-changed','Built publication artifact changed; publish the current version again')
     }
     await validate()

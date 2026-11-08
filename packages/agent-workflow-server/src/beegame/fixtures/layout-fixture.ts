@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PROJECT_DOCUMENTS } from '../project-content-authority'
+import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { checkDesignHandoff, designHandoffPath, readDesignAcceptanceRequirements, type DesignDocument, type DesignHandoff } from '../design-handoff'
 
 export function uiLayoutFixture(height = 52) {

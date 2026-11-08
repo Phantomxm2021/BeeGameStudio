@@ -6,8 +6,11 @@ import type {
   ConfigReadResponse,
   GetAccountResponse,
   ModelListResponse,
-  SkillsExtraRootsSetResponse,
+  MarketplaceAddResponse,
+  PluginReadResponse,
+  PluginInstallResponse,
   SkillsListResponse,
+  SkillsConfigWriteResponse,
   ThreadGoalClearResponse,
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
@@ -20,7 +23,10 @@ export type BgsStableMethod =
   | 'account/read'
   | 'config/read'
   | 'skills/list'
-  | 'skills/extraRoots/set'
+  | 'marketplace/add'
+  | 'plugin/read'
+  | 'plugin/install'
+  | 'skills/config/write'
   | 'thread/goal/get'
   | 'thread/goal/set'
   | 'thread/goal/clear'
@@ -31,7 +37,10 @@ type BgsStableResponse = {
   'account/read': GetAccountResponse
   'config/read': ConfigReadResponse
   'skills/list': SkillsListResponse
-  'skills/extraRoots/set': SkillsExtraRootsSetResponse
+  'marketplace/add': MarketplaceAddResponse
+  'plugin/read': PluginReadResponse
+  'plugin/install': PluginInstallResponse
+  'skills/config/write': SkillsConfigWriteResponse
   'thread/goal/get': ThreadGoalGetResponse
   'thread/goal/set': ThreadGoalSetResponse
   'thread/goal/clear': ThreadGoalClearResponse

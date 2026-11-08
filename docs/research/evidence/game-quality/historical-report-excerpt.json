@@ -1,0 +1,34 @@
+{
+  "sourcePath": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/apple-catch-audited--e33ebb62cf3a/.beegame/delivery/acceptance.json",
+  "sourceSha256": "b61ac2003c3396b93130781e0f09a09ded4e728cedc4eb94fc153b69e25f84ed",
+  "declaredStatus": "passed",
+  "scope": "delivery",
+  "summary": "已实现并实际运行“苹果接接乐”核心循环：键鼠移动篮子接苹果，接满 10 个获胜、漏接 3 个失败、可立即重开；标题、HUD、自动暂停、胜负、加载与加载错误界面均已在目标 Web/React + Phaser 运行时观测。",
+  "visualComparisons": [
+    {
+      "state": "标题",
+      "sourcePath": "assets/reference/apple-catch-concept-atlas.png",
+      "observationPaths": [
+        "reports/01-title.png"
+      ],
+      "status": "different",
+      "differences": [
+        "概念图为七面板参考板，标题面板使用手绘字与固定装饰；运行时沿用同一果园背景、红标题、奶油提示条、红纸主按钮与装饰藤篮，但字距、按钮比例和声音按钮尺寸按 GDD §6.2 的真实文本/控件排版。"
+      ],
+      "nonBlockingReason": "GDD §6.2 明确概念图的示例尺寸、比例与字距为示意；确认的卡通果园外观与信息层级保持不变。"
+    },
+    {
+      "state": "进行中",
+      "sourcePath": "assets/reference/apple-catch-concept-atlas.png",
+      "observationPaths": [
+        "reports/03-catching.png"
+      ],
+      "status": "different",
+      "differences": [
+        "运行时 HUD 采用奶油纸面板加苹果/破碎苹果/藤篮图标皮肤，没有直接拉伸概念图的手绘计分卡；苹果、篮子、背景与接住反馈沿用选定外观，计数为实时文本。"
+      ],
+      "nonBlockingReason": "GDD §9 已记录 68 px 高计分条改用运行时纸面板与图标皮肤以避免整卡纵向压缩失真；计数、图标与文字编码及信息层级未改变。"
+    }
+  ],
+  "interpretationLimit": "Author declaration with admitted differences; not proof of independent aesthetic approval or current host admission. Source left unchanged."
+}

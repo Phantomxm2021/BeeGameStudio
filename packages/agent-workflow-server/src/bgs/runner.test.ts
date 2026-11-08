@@ -12,7 +12,8 @@ import * as browserCleanup from '../beegame/native-test-browser-cleanup'
 import { BgsClient } from './client'
 import { assertDesignReviewReady, DESIGN_REVIEW_INSTRUCTIONS, type DesignReviewReceipt, type DesignReviewDisposition } from '../beegame/workflow-v3/design-review'
 
-import { parseProductionResult, productionOutputSchema } from '../beegame/workflow-v3/production-workflow'
+import { createRun } from '../beegame/workflow-v3/state'
+import { productionAssignmentBaseInstructions, productionWorkflowToolDescription, parseProductionResult, productionOutputSchema } from '../beegame/workflow-v3/production-workflow'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
   lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) })
@@ -70,13 +71,47 @@ test('implementation uses native completion without a BGS browser contract: '+mo
     expect(authorized).toBe(mode==='missing-history'?1:0)
     const author=trace.find(entry=>entry.method===(mode==='cold-resume'?'thread/resume':'thread/start')&&entry.params.permissions==='bgs-project')!
     expect(author.params).toMatchObject({approvalPolicy:'on-request',approvalsReviewer:'auto_review'})
+    expect(author.params).not.toHaveProperty('baseInstructions')
     expect(author.params.config.mcp_servers['bgs-browser']).toMatchObject({enabled_tools:['browser_run_code_unsafe','browser_evaluate'],disabled_tools:['browser_click']})
+    expect(trace.find(entry=>entry.method==='turn/start')!.params).not.toHaveProperty('outputSchema')
+    expect(JSON.stringify(author.params.developerInstructions)).toContain('For ordinary task completion')
     expect(trace.some(entry=>entry.method==='mcpServerStatus/list'||entry.method==='mcpServer/tool/call')).toBe(false)
     expect(trace.filter(entry=>entry.method==='thread/start'&&entry.params.permissions==='bgs-project-review')).toHaveLength(0)
     expect(trace.filter(entry=>entry.method==='turn/start')).toHaveLength(1)
     if(mode==='cold-resume')expect(trace.find(entry=>entry.method==='turn/start')!.params.input).toEqual([])
   }finally{try{await f?.close()}finally{rpc.mockRestore();cleanup.mockRestore()}}
 },30000)
+
+for(const recovery of [false,true])
+for(const stage of ['implementation','verification'] as const)
+test('isolated '+stage+' role reaches native '+(recovery?'resume':'start')+' without restricting tools',async()=>{
+  const run=createRun({projectId:'role',ownerId:'owner',workspacePath:'/synthetic',chatSessionId:'chat',requestKey:'role',text:'One current game',constraints:{},ids:['goal']})
+  run.creation={initialDelivery:'complete-game',editableContent:false,verification:'isolated'}
+  const baseInstructions=productionAssignmentBaseInstructions(run,{stage,originRequestKey:'role'})
+  const f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt',BGS_FIXTURE_DESIGN_REVIEW:'manual',
+    BEEGAME_NATIVE_MCP_SERVERS_JSON:JSON.stringify([{id:'browser',name:'Browser',enabled:true,autoStart:true,scope:'global',transport:'stdio',command:'/fixture/browser'}]),
+  },resolveOutboundTarget,recovery?'saved-phase-role':undefined,undefined,recovery,undefined,async()=>({}),{baseInstructions})
+  const runtime=f.runtime as any
+  try {
+    const pending=f.submit('Current assignment source data')
+    await waitUntil(()=>runtime.active?.turnId==='turn-1')
+    const emit=(...events:any[])=>runtime.client.request('fixture/events',{events})
+    await emit({method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{id:'done',type:'agentMessage',phase:'final_answer',text:'Current assignment handed off'}}},
+      {method:'turn/completed',params:{threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:'completed'}}})
+    await pending
+    const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    const thread=trace.find(item=>item.method===(recovery?'thread/resume':'thread/start'))!
+    expect(thread.params).not.toHaveProperty('baseInstructions')
+    expect(thread.params.developerInstructions.split(baseInstructions!)).toHaveLength(2)
+    expect(thread.params).toMatchObject({permissions:'bgs-project',approvalPolicy:'on-request',approvalsReviewer:'auto_review'})
+    expect(thread.params.config.mcp_servers['bgs-browser']).toMatchObject({command:'/fixture/browser'})
+    expect(thread.params.config.mcp_servers['bgs-browser'].enabled).not.toBe(false)
+    if(!recovery)expect(thread.params.dynamicTools.map((tool:any)=>tool.name)).toContain('BgsWorkflow')
+    const start=trace.find(item=>item.method==='turn/start')!
+    expect(start.params).not.toHaveProperty('outputSchema')
+    if(recovery)expect(start.params.input).toEqual([])
+  }finally{await f.close()}
+})
 
 for (const mode of ['live-command', 'pending-mcp', 'document-task',
   'receipt-exit', 'receipt-content-exit', 'receipt-running', 'receipt-malformed', 'receipt-wrong-thread', 'receipt-wrong-turn', 'receipt-spoofed-output', 'receipt-without-placeholder', 'receipt-unknown-call', 'receipt-no-context', 'receipt-no-identity', 'receipt-no-history'] as const)
@@ -216,8 +251,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
   nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
   permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>,
   workflow?: import('../beegame/session-manager').BeeGameHostToolCapability,
-  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'finalOutput' | 'restartFromDesign'> &
-    Pick<import('../beegame/session-manager').BeeGameSessionRunnerStartInput,'uiLayoutConstraints'> = {}) {
+  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'finalOutput' | 'restartFromDesign' | 'implementationHandoff' | 'baseInstructions' | 'workflowDescription'> = {}) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   const childPidFile = join(root, 'owned-child.pid')
   const confirmedBriefContext = hostTools.finalOutput?.designReview ? 'Synthetic confirmed PC requirements' : undefined
@@ -458,7 +492,12 @@ test.each(['../outside.md', 'absolute-sibling', 'docs/GDD.mdd', 'src/example.js'
 
 test('questions return actual user answers to the requesting item', async () => {
   const f = await fixture()
-  try { await f.submit('question'); expect(f.events.some(e => e.text.includes('"answers":["A"]'))).toBe(true) }
+  try {
+    const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    const start=trace.find(call=>call.method==='thread/start')
+    expect(start.params.config['features.default_mode_request_user_input']).toBe(true)
+    expect(start.params.dynamicTools.some((tool:any)=>tool.name==='AskUserQuestion')).toBe(false)
+    await f.submit('question'); expect(f.events.some(e => e.text.includes('"answers":["A"]'))).toBe(true) }
   finally { await f.close() }
 }, 30_000)
 
@@ -646,18 +685,74 @@ test.each(['write', 'edit', 'denied', 'revoked', 'cancelled', 'instructions'] as
   }
 }, 30_000)
 
-test('required Bgs skill selection fails clearly when absent and accepts a real catalog entry', async () => {
-  const missing=await fixture()
-  try {await expect(missing.submit('$missing-fixture-skill Use method')).rejects.toThrow('Required BGS skill is unavailable')}
-  finally {await missing.close()}
-  const available=await fixture()
+for (const mode of ['unknown','known','unconfigured','chatgpt'] as const)
+test('native model prompts receive no other model Skill chapter: '+mode,async()=>{
+  const original=BgsClient.prototype.request,trace:Array<{method:string;params:any}>=[]
+  const rpc=spyOn(BgsClient.prototype,'request').mockImplementation(async function(this:BgsClient,method:string,params:any,timeout?:number):Promise<any>{
+    trace.push({method,params})
+    return original.call(this,method,params,timeout)
+  })
+  let f:Awaited<ReturnType<typeof fixture>>|undefined
   try {
-    await available.submit([{type:'text',text:'Current platform facts'}, {type:'text',text:'$game-creative-director-expert Apply the method'}])
-    expect(available.events.some(event=>event.text==='Native skill selected')).toBe(true)
-  } finally {await available.close()}
+    f=await fixture('allow',{
+      ...(mode==='unconfigured'?{}:{BEEGAME_MODEL:mode==='known'?'fixture-known-model':'third-party-fixture'}),
+      ...(mode==='chatgpt'?{OPENAI_AUTH_MODE:'chatgpt'}:{}),
+    })
+    await f.submit('Implement this fixture request')
+    const start=trace.find(e=>e.method==='thread/start')!.params
+    expect(start.baseInstructions).toBeUndefined()
+    expect(start.developerInstructions).not.toContain('OFFICIAL_SKILL_USAGE_FIXTURE')
+    expect(start.developerInstructions).not.toContain('OTHER_MODEL_SKILL_USAGE_FIXTURE')
+    expect(start.developerInstructions).not.toContain('GPT-5.6 fixture identity.')
+    expect(start.developerInstructions).not.toContain('Fixture identity.')
+    expect(start.developerInstructions).not.toContain('Not part of the Skill chapter.')
+    expect(trace.find(e=>e.method==='turn/start')!.params.input).toEqual([{type:'text',text:'Implement this fixture request'}])
+    expect(trace.filter(e=>e.method==='config/read')).toHaveLength(1)
+  }finally{try{await f?.close()}finally{rpc.mockRestore()}}
 },30000)
 
-test('an unrelated broken skill does not block valid skills, while a missing required skill still stops before submission', async () => {
+test('Skill mentions in multiple text blocks pass to native without selection or rewriting', async () => {
+  const original=BgsClient.prototype.request,trace:Array<{method:string;params:any}>=[]
+  const rpc=spyOn(BgsClient.prototype,'request').mockImplementation(async function(this:BgsClient,method:string,params:any,timeout?:number):Promise<any>{
+    trace.push({method,params});return original.call(this,method,params,timeout)
+  })
+  let f:Awaited<ReturnType<typeof fixture>>|undefined
+  try {
+    f=await fixture()
+    const prompt=[{type:'text' as const,text:'Use $game-creative-director-expert for this task.'},
+      {type:'text' as const,text:'$fixture:method and $missing-fixture-skill remain user text.'}]
+    await f.submit(prompt)
+    expect(trace.find(e=>e.method==='turn/start')!.params.input).toEqual(prompt)
+  }finally{try{await f?.close()}finally{rpc.mockRestore()}}
+},30000)
+
+for (const mode of ['plain','enabled','disabled','missing','namespaced','inline','recovery'] as const)
+test('native owns user Skill mention handling and recovery: '+mode,async()=>{
+  const original=BgsClient.prototype.request,trace:Array<{method:string;params:any}>=[]
+  const rpc=spyOn(BgsClient.prototype,'request').mockImplementation(async function(this:BgsClient,method:string,params:any,timeout?:number):Promise<any>{
+    trace.push({method,params})
+    const result=await original.call(this,method,params,timeout)
+    if(method==='skills/list' && mode==='disabled') {
+      const catalog=result as import('./native-protocol').BgsStableResult<'skills/list'>
+      for(const entry of catalog.data)for(const skill of entry.skills)if(skill.name==='game-creative-director-expert')skill.enabled=false
+    }
+    return result
+  })
+  let f:Awaited<ReturnType<typeof fixture>>|undefined
+  try {
+    f=await fixture('allow',{},resolveOutboundTarget,mode==='recovery'?'saved-method-thread':undefined,undefined,mode==='recovery')
+    const prompt=mode==='recovery'?[]:mode==='plain'?'Complete the current fixture task':
+      mode==='inline'?'Use $game-creative-director-expert for this task.':
+      '$'+(mode==='missing'?'not-installed-fixture':mode==='namespaced'?'fixture:method':'game-creative-director-expert')+' Complete the current fixture task'
+    await f.submit(prompt)
+    const inputs=trace.find(e=>e.method==='turn/start')!.params.input
+    expect(inputs).toEqual(mode==='recovery'?[]:[{type:'text',text:prompt}])
+    expect(inputs.some((item:any)=>item.type==='skill')).toBe(false)
+    expect(f.events.some(e=>e.eventType.startsWith('assistant.'))).toBe(true)
+  }finally{try{await f?.close()}finally{rpc.mockRestore()}}
+},30000)
+
+test('catalog warnings do not override native handling of user Skill mentions', async () => {
   const root = await mkdtemp('/private/tmp/bgs-skill-catalog-'), game = join(root, 'game')
   await mkdir(game)
   const warnings: unknown[][] = [], warn = console.warn
@@ -672,15 +767,10 @@ test('an unrelated broken skill does not block valid skills, while a missing req
         onNativeSubmission: () => { submitted = true } })
       const result = runtime.submit({ prompt: '$'+required+' Apply the method', signal: AbortSignal.timeout(5000),
         onMessage: value => { events.push(value) }, requestPermission: async () => ({ behavior: 'deny' }) })
-      if (required === 'game-creative-director-expert') {
-        await result
-        expect(submitted).toBe(true)
-        expect(events.some(event => event.text === 'Native skill selected')).toBe(true)
-      } else {
-        await expect(result).rejects.toThrow('Required BGS skill is unavailable: '+required)
-        expect(submitted).toBe(false)
-        expect(events.some(event => event.eventType === 'assistant.message')).toBe(false)
-      }
+      await result
+      expect(submitted).toBe(true)
+      const calls=(await readFile(join(root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      expect(calls.filter(call=>call.method==='turn/start').at(-1).params.input).toEqual([{type:'text',text:'$'+required+' Apply the method'}])
       await runtime.dispose?.(); runtime = undefined
     }
     expect(warnings).toHaveLength(2)
@@ -1029,19 +1119,27 @@ test.each(['resolved', 'turn-completed', 'collab-terminal'])(
 
 
 test('native workflow registration respects new versus resumed thread capabilities', async () => {
-  for (const mode of ['ordinary', 'new-workflow', 'resumed-workflow']) {
+  for (const mode of ['ordinary', 'new-workflow', 'resumed-workflow','read-only-workflow','design-workflow']) {
     const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget,
       mode === 'resumed-workflow' ? '019a0000-0000-7000-8000-000000000001' : undefined,
-      undefined, false, undefined, mode === 'ordinary' ? undefined : async () => ({}))
+      undefined, false, undefined, mode === 'ordinary' ? undefined : async () => ({}),
+      {workflowDescription:productionWorkflowToolDescription({stage:mode==='design-workflow'?'design':mode==='read-only-workflow'?'verification':'implementation',originRequestKey:'fixture'},true),
+        ...(['read-only-workflow','design-workflow'].includes(mode)?{finalOutput:{readOnly:true,schema:{type:'object'},accept:async()=>''}}:{})})
     try {
       const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
       const start = rpc.find(call => ['thread/start', 'thread/resume'].includes(call.method))
-      expect(start.params.dynamicTools?.some((tool: any) => tool.name === 'BgsWorkflow') ?? false).toBe(mode === 'new-workflow')
+      expect(start.params.dynamicTools?.some((tool: any) => tool.name === 'BgsWorkflow') ?? false).toBe(mode === 'new-workflow' || mode === 'read-only-workflow' || mode === 'design-workflow')
       if (mode === 'new-workflow') {
         const tool=start.params.dynamicTools.find((tool: any) => tool.name === 'BgsWorkflow')
         expect(tool.inputSchema.properties.action.enum).toEqual(['status','advance','visual','resources','implement','select-visual','preview'])
-        expect(tool.description).toContain('GDD and visual-design results use the current final JSON contract, not advance')
-        expect(tool.description).toContain('select-visual in implementation or resource tasks')
+        expect(tool.description).toBe(productionWorkflowToolDescription({stage:'implementation',originRequestKey:'fixture'},true))
+        expect(tool.description).not.toContain('Return saved design results')
+        expect(start.params.dynamicTools.map((tool:any)=>tool.name)).toEqual(['BgsWorkflow'])
+      }
+      if(['read-only-workflow','design-workflow'].includes(mode)) {
+        expect(start.params.dynamicTools.map((tool:any)=>tool.name)).toEqual(['BgsWorkflow'])
+        expect(start.params.dynamicTools.find((tool:any)=>tool.name==='BgsWorkflow').description)
+          .toBe(productionWorkflowToolDescription({stage:mode==='design-workflow'?'design':'verification',originRequestKey:'fixture'},true))
       }
       if (mode === 'resumed-workflow') expect(start.params).not.toHaveProperty('dynamicTools')
       else expect(start.params.dynamicTools.every((tool: any) => tool.type === 'function')).toBe(true)
@@ -1054,14 +1152,13 @@ test('new and resumed threads do not register retired measurement or submission 
   for (const resumed of [false,true]) {
     const f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt'},resolveOutboundTarget,
       resumed?'019a0000-0000-7000-8000-000000000001':undefined,
-      undefined,false,undefined,undefined,{uiLayoutConstraints:{platform:'Web'}})
+      undefined,false,undefined,undefined)
     try {
       const rpc=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
       const start=rpc.find(call=>['thread/start','thread/resume'].includes(call.method))
-      const server=start.params.config.mcp_servers['bgs-ui-layout']
+      expect(start.params.config.mcp_servers).not.toHaveProperty('bgs-ui-layout')
       expect(start.params.dynamicTools?.some((tool:any)=>['BgsMeasurement','BgsFinishDelivery'].includes(tool.name))??false).toBe(false)
 
-      expect(server).not.toHaveProperty('disabled_tools')
     } finally {await f.close()}
   }
 })
@@ -1110,11 +1207,12 @@ test('legacy Skill-tool count excludes Shell read evidence, including after tran
 })
 
 
-for(const result of ['ready','malformed','missing','rejected'] as const)test('native final output '+result+' is handled once without a new turn',async()=>{
+for(const recovery of [false,true])
+for(const result of ['ready','malformed','mixed','missing','rejected'] as const)test((recovery?'restored':'new')+' final JSON '+result+' is handled once without a new turn',async()=>{
   const accepted:unknown[]=[]
   const contract={schema:{type:'object',properties:{summary:{type:'string'}},required:['summary'],additionalProperties:false},
     accept:async(value:unknown)=>{accepted.push(value);if(result==='rejected')throw Error('Source changed');return 'Chapter handed off'}}
-  const f=await fixture('allow',{},resolveOutboundTarget,undefined,undefined,false,undefined,undefined,{finalOutput:contract})
+  const f=await fixture('allow',{BGS_FIXTURE_DESIGN_REVIEW:'manual'},resolveOutboundTarget,recovery?'restored-author':undefined,undefined,recovery,undefined,undefined,{finalOutput:contract})
   const client=(f.runtime as unknown as {client:BgsClient}).client
   const submitted=f.submit('hang').then(()=>null,error=>error as Error)
   try {
@@ -1122,7 +1220,7 @@ for(const result of ['ready','malformed','missing','rejected'] as const)test('na
     const emit=(...events:unknown[])=>client.request('fixture/events',{events})
     const item=(text:string,phase:string='final_answer')=>({method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{id:'final',type:'agentMessage',text,phase}}})
     if(result!=='missing') {
-      const text=result==='malformed'?'I am done':JSON.stringify({summary:'Source pointers'})
+      const text=result==='malformed'?'I am done':(result==='mixed'?'设计记录已完成。\n\n':'')+JSON.stringify({summary:'Source pointers'})
       await emit({method:'item/agentMessage/delta',params:{threadId:f.sessionId,turnId:'turn-1',itemId:'final',delta:text}},item(text))
     }
     await emit({method:'turn/completed',params:{threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:'completed'}}})
@@ -1135,9 +1233,13 @@ for(const result of ['ready','malformed','missing','rejected'] as const)test('na
     const starts=trace.filter(item=>item.method==='turn/start')
     expect(starts).toHaveLength(1)
     expect(starts[0].params).not.toHaveProperty('outputSchema')
-    expect(starts[0].params.additionalContext).toBeUndefined()
-    const instructions=trace.find(item=>item.method==='thread/start').params.developerInstructions
+    if(recovery) expect(starts[0].params.additionalContext.bgsRuntime_part_000001.value).toContain(JSON.stringify(contract.schema))
+    else expect(starts[0].params.additionalContext).toBeUndefined()
+    const instructions=trace.find(item=>item.method===(recovery?'thread/resume':'thread/start')).params.developerInstructions
     expect(instructions.split(JSON.stringify(contract.schema))).toHaveLength(2)
+    expect(instructions).toContain('This format applies only to the final answer; use tools and progress messages normally')
+    expect(instructions).not.toContain('For ordinary task completion')
+    expect(instructions).toContain('Final JSON schema:')
   }finally{await f.close()}
 })
 
@@ -1180,6 +1282,28 @@ for (const [text, phase, visible] of [
     expect(messages.map(event => event.text)).toEqual(visible ? [text, 'Validated handoff'] : ['Validated handoff'])
     expect(messages.some(event => event.text.includes('PRIVATE_'))).toBe(false)
   } finally { await f.close() }
+})
+
+for(const phase of [undefined,'final_answer'] as const)test('tool work invalidates an earlier JSON completion: '+String(phase),async()=>{
+  const accepted:unknown[]=[]
+  const f=await fixture('allow',{BGS_FIXTURE_DESIGN_REVIEW:'manual'},resolveOutboundTarget,
+    undefined,undefined,false,undefined,undefined,{finalOutput:{schema:{type:'object'},accept:async value=>{accepted.push(value);return 'Must not accept'}}})
+  const client=(f.runtime as unknown as {client:BgsClient}).client
+  const submitted=f.submit('Complete the current work').then(()=>null,error=>error as Error)
+  try{
+    await waitUntil(()=>(f.runtime as unknown as {active?:{turnId?:string}}).active?.turnId==='turn-1')
+    const params={threadId:f.sessionId,turnId:'turn-1'}
+    const tool={id:'later-read',type:'commandExecution',command:'cat docs/GDD.md'}
+    await client.request('fixture/events',{events:[
+      {method:'item/completed',params:{...params,item:{id:'interim',type:'agentMessage',text:'{"summary":"PRIVATE_INTERIM"}',...(phase?{phase}:{})}}},
+      {method:'item/started',params:{...params,item:{...tool,status:'inProgress'}}},
+      {method:'item/completed',params:{...params,item:{...tool,status:'completed',exitCode:0,aggregatedOutput:'Read complete',durationMs:1}}},
+      {method:'turn/completed',params:{...params,turn:{id:'turn-1',status:'completed'}}},
+    ]})
+    expect((await submitted)?.message).toContain('final result is missing or invalid')
+    expect(accepted).toEqual([])
+    expect(f.events.some(event=>event.text?.includes('PRIVATE_INTERIM'))).toBe(false)
+  }finally{await f.close()}
 })
 
 test('rg no-result classification requires a literal whole command and an ordinary empty exit 1', () => {
@@ -1236,13 +1360,29 @@ test.each(['write-design','edit-design:{"old_string":"Existing","new_string":"Ch
       expect(f.questions).toHaveLength(0)
       const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
       const start=trace.find(item=>item.method==='thread/start')
-      expect(start.params.developerInstructions).toContain('Project files are read-only for this document task')
-      // Persist the regular dynamic tool catalog so a later authorized turn can use it;
-      // the current contract, rather than thread history, decides write authority.
-      expect(start.params.dynamicTools.map((tool:any)=>tool.name)).toContain('WriteProjectFile')
+      expect(start.params.developerInstructions).toContain('Project files are read-only for this task')
+      expect(start.params.dynamicTools.map((tool:any)=>tool.name)).toEqual([])
+      expect(start.params.developerInstructions).not.toContain('Use WriteProjectFile or EditProjectFile')
     }finally{await f.close()}
   })
 
+
+test('read-only native resume keeps the existing history and rejects historical write tools',async()=>{
+  const f=await fixture('allow',{},resolveOutboundTarget,'019a0000-0000-7000-8000-000000000001',
+    undefined,false,undefined,async()=>({assignment:'verification'}),{
+      workflowDescription:productionWorkflowToolDescription({stage:'verification',originRequestKey:'fixture'}),
+      finalOutput:{readOnly:true,schema:{type:'object'},accept:async()=>{throw Error('No valid verification result')}}})
+  try {
+    await writeFile(join(f.workspace,'docs/GDD.md'),'Existing')
+    await expect(f.submit('write-design')).rejects.toThrow('final result is missing or invalid')
+    expect(await readFile(join(f.workspace,'docs/GDD.md'),'utf8')).toBe('Existing')
+    expect(f.questions).toHaveLength(0)
+    const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    const resume=trace.find(call=>call.method==='thread/resume')
+    expect(resume.params).not.toHaveProperty('dynamicTools')
+    expect(trace.some(call=>call.method==='thread/start')).toBe(false)
+  }finally{await f.close()}
+})
 
 test('document write capability authorizes only the current parent turn after permission recheck', async () => {
   const order: string[] = []
@@ -1258,6 +1398,9 @@ test('document write capability authorizes only the current parent turn after pe
         accept: async () => 'unused',
       },
     })
+  const startTrace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+  expect(startTrace.find(call=>call.method==='thread/start').params.dynamicTools.map((tool:any)=>tool.name))
+    .toEqual([])
   const client = (f.runtime as unknown as { client: BgsClient }).client
   const abort = new AbortController()
   const submitted = f.submit('hang', abort.signal).catch(error => error)
@@ -1276,13 +1419,13 @@ test('document write capability authorizes only the current parent turn after pe
     await emit(write('parent-write'))
     await waitUntilAsync(async () => (await responses()).some(response => response.id === 'parent-write'))
     expect((await responses()).find(response => response.id === 'parent-write')?.result?.success).toBe(true)
-    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize'])
+    expect(order).toEqual(['authorize', 'permission:initial', 'permission:recheck', 'authorize'])
     expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('working GDD')
 
     await emit(edit('parent-edit'))
     await waitUntilAsync(async () => (await responses()).some(response => response.id === 'parent-edit'))
     expect((await responses()).find(response => response.id === 'parent-edit')?.result?.success).toBe(true)
-    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+    expect(order).toEqual(['authorize', 'permission:initial', 'permission:recheck', 'authorize',
       'permission:initial', 'permission:recheck', 'authorize'])
     expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('edited GDD')
 
@@ -1293,7 +1436,7 @@ test('document write capability authorizes only the current parent turn after pe
     await emit(write('wrong-path', f.sessionId, 'turn-1', 'docs/other.md'))
     await waitUntilAsync(async () => (await responses()).some(response => response.id === 'wrong-path'))
     expect((await responses()).find(response => response.id === 'wrong-path')?.result?.success).toBe(false)
-    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+    expect(order).toEqual(['authorize', 'permission:initial', 'permission:recheck', 'authorize',
       'permission:initial', 'permission:recheck', 'authorize'])
     expect(await Bun.file(join(f.workspace, 'docs/other.md')).exists()).toBe(false)
 
@@ -1302,7 +1445,7 @@ test('document write capability authorizes only the current parent turn after pe
       await waitUntilAsync(async () => (await responses()).some(response => response.id === id))
       expect((await responses()).find(response => response.id === id)?.result?.success).toBe(false)
     }
-    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+    expect(order).toEqual(['authorize', 'permission:initial', 'permission:recheck', 'authorize',
       'permission:initial', 'permission:recheck', 'authorize'])
 
     await emit({ method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: {
@@ -1311,7 +1454,7 @@ test('document write capability authorizes only the current parent turn after pe
     } } }, write('child-write', 'child', 'child-1'))
     await waitUntilAsync(async () => (await responses()).some(response => response.id === 'child-write'))
     expect((await responses()).find(response => response.id === 'child-write')?.result?.success).toBe(false)
-    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+    expect(order).toEqual(['authorize', 'permission:initial', 'permission:recheck', 'authorize',
       'permission:initial', 'permission:recheck', 'authorize'])
     expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('edited GDD')
   } finally {
@@ -1323,14 +1466,14 @@ test('document write capability authorizes only the current parent turn after pe
 
 
 test.each(['request', 'task', 'revoked'] as const)('document authorization blocks a %s cancellation during its final wait', async cancellation => {
-  let entered = false
+  let entered = false, authorizations = 0
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget, undefined, undefined, false,
     () => Promise.resolve({ behavior: 'allow', source: 'policy' }), undefined, {
       finalOutput: {
         readOnly: true,
-        writeDocument: { path: 'docs/GDD.md', authorize: async () => { entered = true; await gate; if (cancellation === 'revoked') throw Error('Writer changed or paused') } },
+        writeDocument: { path: 'docs/GDD.md', authorize: async () => { if(++authorizations===1)return; entered = true; await gate; if (cancellation === 'revoked') throw Error('Writer changed or paused') } },
         schema: { type: 'object' },
         accept: async () => 'unused',
       },
@@ -1362,8 +1505,9 @@ test.each(['request', 'task', 'revoked'] as const)('document authorization block
   }
 }, 10_000)
 
-for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution', 'advisory-label', 'invalid', 'failed', 'source-changed', 'snapshot-changed', 'exhausted', 'cancel', 'blocked'] as const)
-  test('independent GDD review: ' + outcome, async () => {
+for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution', 'advisory-label', 'invalid', 'schema-echo', 'interim-report', 'failed', 'source-changed', 'snapshot-changed', 'exhausted', 'cancel', 'blocked'] as const)
+  for (const readOnly of ['pass','revise','cancel','source-changed','snapshot-changed'].includes(outcome) ? [true,false] : [true])
+  test('independent GDD review: ' + outcome + ', authorReadOnly=' + readOnly, async () => {
     const receipts: DesignReviewReceipt[] = [], accepted: unknown[] = []
     const needsRevision = ['revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution'].includes(outcome)
     const candidateText = outcome === 'revise'
@@ -1371,7 +1515,7 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       : 'candidate-1\n完整设计 🎮\r\nSOURCE_END\n'
     let sourceHash = createHash('sha256').update(candidateText).digest('hex')
     const source = () => ({ path: 'docs/GDD.md', sha256: sourceHash })
-    const contract = { readOnly: true, schema: { type: 'object' },
+    const contract = { readOnly, ...(!readOnly ? {writeDocument:{path:'docs/GDD.md',authorize:async()=>{}}} : {}), schema: { type: 'object' },
       designReview: {
         context: 'Current GDD handoff: visual design with the approved target library.',
         candidate: async (value: unknown) => {
@@ -1435,6 +1579,9 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       expect(reviewer.config['features.goals']).toBe(false)
       expect(reviewer.config['features.image_generation']).toBe(false)
       expect(reviewer.config['features.view_image']).toBe(false)
+      expect(reviewer.config['features.default_mode_request_user_input']).toBe(false)
+      expect(starts[0].params.developerInstructions).not.toContain('OFFICIAL_SKILL_USAGE_FIXTURE')
+      expect(reviewer.developerInstructions).not.toContain('OFFICIAL_SKILL_USAGE_FIXTURE')
       expect(reviewer.developerInstructions).toContain(DESIGN_REVIEW_INSTRUCTIONS)
       expect(reviewer.developerInstructions).not.toContain('Author-only')
       expect(reviewer.developerInstructions).not.toContain('Return only the required status and summary')
@@ -1449,8 +1596,10 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       expect(f.events.find(event => event.eventType === 'tool.started' && event.text === 'Independent GDD review')!.input.prompt).not.toContain('SOURCE_END')
       expect(reviewer.config['skills.config'].every((skill: {enabled: boolean}) => !skill.enabled)).toBe(true)
       expect(initialReview.input[0].text).not.toContain('Author-only')
-      expect(initialReview.outputSchema).toMatchObject({ required: ['summary', 'findings'], additionalProperties: false })
-      expect(initialReview.outputSchema.properties).not.toHaveProperty('resolutions')
+      expect(initialReview.input[0].text).not.toContain('Final JSON schema:')
+      const reviewSchema=initialReview.outputSchema
+      expect(reviewSchema).toMatchObject({ required: ['summary', 'findings'], additionalProperties: false })
+      expect(reviewSchema.properties).not.toHaveProperty('resolutions')
       if (outcome === 'cancel') {
         controller.abort()
         expect((await submitted)?.message).toContain('interrupted')
@@ -1473,7 +1622,22 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         await writeFile(join(f.workspace, 'docs/GDD.md'), 'external-change')
         sourceHash = createHash('sha256').update('external-change').digest('hex')
       }
-      await finish('review-thread-2', 'turn-2', outcome === 'invalid' ? 'not a report' : report(needsRevision),
+      if(outcome==='interim-report'){
+        const params={threadId:'review-thread-2',turnId:'turn-2'}
+        const tool={id:'review-calculation',type:'commandExecution',command:'node -e "console.log(1+1)"'}
+        await emit(
+          {method:'item/completed',params:{...params,item:{id:'interim-report',type:'agentMessage',phase:'final_answer',text:report()}}},
+          {method:'item/started',params:{...params,item:{...tool,status:'inProgress'}}},
+          {method:'item/completed',params:{...params,item:{...tool,status:'completed',exitCode:0,aggregatedOutput:'2',durationMs:1}}},
+          {method:'turn/completed',params:{...params,turn:{id:'turn-2',status:'completed'}}},
+        )
+        expect((await submitted)?.message).toContain('ended without a report')
+        expect(receipts).toHaveLength(0)
+        expect(accepted).toHaveLength(0)
+        expect((await trace()).filter(row=>row.method==='turn/start')).toHaveLength(2)
+        return
+      }
+      await finish('review-thread-2', 'turn-2', outcome === 'invalid' ? 'not a report' : outcome === 'schema-echo' ? JSON.stringify(reviewSchema) + ',' + report() + '}' : report(needsRevision),
         outcome === 'failed' || outcome === 'exhausted' ? 'failed' : 'completed',
         outcome === 'exhausted' ? { message: 'Incomplete response returned, reason: max_output_tokens PRIVATE_UPSTREAM_DATA', codexErrorInfo: 'other' } : undefined)
       if (needsRevision) {
@@ -1495,19 +1659,14 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         }
         await finish(f.sessionId, 'turn-3', JSON.stringify({ status: 'ready', summary: 'AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE',
           ...(outcome !== 'missing-response' ? { reviewResponses: [disposition] } : {}) }))
-        if (outcome === 'missing-response') {
-          expect((await submitted)?.message).toContain('exactly one evidence-backed disposition')
-          expect(receipts).toHaveLength(1)
-          expect(accepted).toHaveLength(0)
-          expect((await trace()).filter(row => row.method === 'turn/start')).toHaveLength(3)
-          return
-        }
         await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 4)
         const followup = (await trace()).filter(row => row.method === 'turn/start')[3].params
         expect(followup.threadId).toBe('review-thread-3')
         expect(followup.parentTurnId).toBe('turn-3')
-        expect(followup.outputSchema.required).toEqual(['summary', 'findings', 'resolutions'])
-        expect(followup.outputSchema.properties.resolutions).toMatchObject({ minItems: 1, maxItems: 1,
+        expect(followup.input[0].text).not.toContain('Final JSON schema:')
+        const followupSchema=followup.outputSchema
+        expect(followupSchema.required).toEqual(['summary', 'findings', 'resolutions'])
+        expect(followupSchema.properties.resolutions).toMatchObject({ minItems: 1, maxItems: 1,
           items: { properties: { finding: { minimum: 1, maximum: 1 } } } })
         expect(followup.input[0].text).toContain('Synthetic confirmed PC requirements')
         expect(followup.input[0].text).toContain(contract.designReview.context)
@@ -1517,13 +1676,16 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         expect(followupStart.config).toEqual(reviewer.config)
         expect(followup.input[0].text).toContain('Targeted follow-up only')
         expect(followup.input[0].text).toContain(sourceHash)
-        expect(followup.input[0].text).toContain(disposition.evidence)
+        expect(followup.input[0].text).toContain(finding.evidence)
+        if (outcome === 'missing-response') expect(followup.input[0].text).not.toContain(disposition.evidence)
+        else expect(followup.input[0].text).toContain(disposition.evidence)
         if (outcome === 'revise') {
           expect(followup.input[0].text).toContain('Required: a player can confirm or cancel a choice.')
           expect(followup.input[0].text).toContain('Author proposal: confirmation is immediate.')
           expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).not.toContain('confirmation requires a second action')
         }
-        expect(followup.input[0].text).not.toContain('AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE')
+        expect(followup.input[0].text).toContain('Author revision summary:')
+        expect(followup.input[0].text).toContain('AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE')
         await emit({ method: 'item/completed', params: { threadId: 'review-thread-2', turnId: 'turn-2',
           item: { type: 'agentMessage', id: 'stale-review', text: 'stale malformed report', phase: 'final_answer' } } })
         await finish('review-thread-3', 'turn-4', report(outcome === 'unresolved' || outcome === 'new-defect', true))
@@ -1535,7 +1697,8 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         const revision = (await trace()).filter(row => row.method === 'turn/start')[4].params
         expect(revision.threadId).toBe(f.sessionId)
         expect(revision.additionalContext.bgsRuntime_part_000001.value).toContain(finding.issue)
-        expect(revision.additionalContext.bgsRuntime_part_000001.value).toContain('reviewResponses')
+        expect(revision).not.toHaveProperty('outputSchema')
+        expect(revision.additionalContext.bgsRuntime_part_000001.value).toContain(JSON.stringify(contract.schema))
         await writeFile(join(f.workspace, 'docs/GDD.md'), 'candidate-3')
         sourceHash = createHash('sha256').update('candidate-3').digest('hex')
         await finish(f.sessionId, 'turn-5', JSON.stringify({ status: 'ready', summary: 'Second revision', reviewResponses: [disposition] }))
@@ -1545,16 +1708,16 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         await finish('review-thread-4', 'turn-6', report(outcome === 'unresolved', true))
       }
       const error = await submitted
-      if (outcome === 'pass' || outcome === 'revise' || outcome === 'rejected' || outcome === 'new-defect') {
+      if (outcome === 'pass' || outcome === 'revise' || outcome === 'rejected' || outcome === 'new-defect' || outcome === 'missing-response') {
         expect(error).toBeNull()
         expect(accepted).toHaveLength(1)
         expect(receipts.at(-1)?.source.sha256).toBe(sourceHash)
         expect(receipts.at(-1)?.nativeThreadId).toBe(outcome === 'pass' ? 'review-thread-2' : outcome === 'new-defect' ? 'review-thread-4' : 'review-thread-3')
         expect(receipts.at(-1)?.nativeTurnId).toBe(outcome === 'pass' ? 'turn-2' : outcome === 'new-defect' ? 'turn-6' : 'turn-4')
-        if (needsRevision) expect(receipts.at(-1)?.authorResponses).toEqual([disposition])
+        if (needsRevision) expect(receipts.at(-1)?.authorResponses).toEqual(outcome === 'missing-response' ? [] : [disposition])
         expect(f.events.filter(e => e.eventType === 'assistant.message').map(e => e.text).join('')).toContain('GDD handed off')
       } else {
-        expect(error?.message).toContain({ unresolved: 'did not reduce outstanding', 'missing-resolution': 'exactly one evidence-backed disposition', 'missing-response': 'exactly one evidence-backed disposition', 'advisory-label': 'invalid report', invalid: 'invalid JSON', failed: 'review failed', exhausted: 'max_output_tokens', 'source-changed': 'changed during' }[outcome])
+        expect(error?.message).toContain({ unresolved: 'did not reduce outstanding', 'missing-resolution': 'exactly one evidence-backed disposition', 'missing-response': 'exactly one evidence-backed disposition', 'advisory-label': 'invalid report', invalid: 'invalid JSON', 'schema-echo': 'invalid JSON', failed: 'review failed', exhausted: 'max_output_tokens', 'source-changed': 'changed during' }[outcome])
         expect(accepted).toHaveLength(0)
         if (outcome === 'exhausted') {
           expect(error).toMatchObject({ bgsErrorInfo: 'other' })
@@ -1571,7 +1734,7 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         }
       }
       const rounds = outcome === 'unresolved' || outcome === 'new-defect' ? 3 : needsRevision ? 2 : 1
-      expect(receipts).toHaveLength(['invalid', 'failed', 'exhausted', 'source-changed', 'advisory-label'].includes(outcome) ? 0 : outcome === 'missing-resolution' ? 1 : rounds)
+      expect(receipts).toHaveLength(['invalid', 'schema-echo', 'failed', 'exhausted', 'source-changed', 'advisory-label'].includes(outcome) ? 0 : outcome === 'missing-resolution' ? 1 : rounds)
       const calls = await trace()
       const reviewThreads = calls.filter(row => row.method === 'thread/start').slice(1)
       expect(reviewThreads).toHaveLength(rounds)
@@ -1806,3 +1969,116 @@ test('image tool display strips direct and JSON-wrapped previews without changin
     await submitted
   } finally { await f.close() }
 }, 30_000)
+
+for(const mode of ['accepted','normal-finish','pending-tool','pending-command','pending-child','receipt-exit','cancel','denied','cleanup-failed','native-failed','restored-ready'] as const)
+test('host implementation readiness preserves native lifecycle: '+mode,async()=>{
+  const original=BgsClient.prototype.request,controller=new AbortController()
+  let ready:string|undefined=mode==='restored-ready'?'Saved runnable handoff':undefined,interrupts=0,cleanupFailed=false
+  let historyPath:string|undefined
+  const rpc=spyOn(BgsClient.prototype,'request').mockImplementation(async function(this:BgsClient,method:string,params:any,timeout?:number):Promise<any>{
+    if(method==='thread/read')return {thread:{id:params.threadId,path:historyPath??null}}
+    if(method==='thread/backgroundTerminals/clean'&&ready&&mode==='cleanup-failed'&&!cleanupFailed){cleanupFailed=true;throw Error('Actual cleanup failure')}
+    if(method==='turn/interrupt'){
+      interrupts++
+      const failed=mode==='native-failed'
+      await original.call(this,'fixture/events',{events:[{method:'turn/completed',params:{threadId:params.threadId,turnId:params.turnId,
+        turn:{id:params.turnId,status:failed?'failed':mode==='normal-finish'?'completed':'interrupted',...(failed?{error:{message:'Actual upstream failure'}}:{})}}}]})
+      return {}
+    }
+    return original.call(this,method,params,timeout)
+  })
+  let f:Awaited<ReturnType<typeof fixture>>|undefined
+  try{
+    f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt',BGS_FIXTURE_DESIGN_REVIEW:'manual'},resolveOutboundTarget,
+      mode==='restored-ready'?'saved-ready-author':undefined,undefined,mode==='restored-ready',undefined,undefined,{implementationHandoff:()=>ready})
+    const runtime=f.runtime as any,client=runtime.client as BgsClient
+    const emit=(...events:any[])=>client.request('fixture/events',{events})
+    let ended=false
+    const submitted=f.submit('Deliver runnable work',controller.signal).then(()=>{ended=true;return null},e=>{ended=true;return e as Error})
+    if(mode!=='restored-ready'){
+      await waitUntil(()=>runtime.active?.turnId==='turn-1')
+      const p={threadId:f.sessionId,turnId:'turn-1'}
+      const handoff={id:'ready-tool',type:'dynamicToolCall',tool:'BgsWorkflow',arguments:{action:'advance'},status:'inProgress'}
+      const pending=['pending-command','receipt-exit'].includes(mode)?{id:'pending-observation',type:'commandExecution',command:'synthetic build',status:'inProgress',source:'agent'}:{id:'pending-observation',type:'mcpToolCall',server:'browser',tool:'browser_evaluate',status:'inProgress'}
+      if(mode==='receipt-exit'){
+        historyPath=join(f.root,'saved-exit.jsonl')
+        await writeFile(historyPath,[{type:'session_meta',payload:{id:f.sessionId}},{type:'turn_context',payload:{turn_id:'turn-1'}},
+          {type:'response_item',payload:{type:'function_call_output',call_id:pending.id,
+            output:'Chunk ID: fixture\nWall time: 0.1 seconds\nProcess exited with code 134\nOriginal token count: 2\nOutput:\nOperation not permitted'}}].map(x=>JSON.stringify(x)).join('\n')+'\n')
+      }
+      if(mode==='pending-child')await emit({method:'item/started',params:{...p,item:{id:'spawn',type:'collabAgentToolCall',tool:'spawnAgent',receiverThreadIds:['child']}}})
+      await emit({method:'item/started',params:{...p,item:handoff}},...(['pending-tool','pending-command','receipt-exit'].includes(mode)?[{method:'item/started',params:{...p,item:pending}}]:[]))
+      if(mode!=='denied')ready='Runnable handoff; independent checks remain'
+      if(mode==='cancel')controller.abort()
+      else{
+        await emit({method:'item/completed',params:{...p,item:{...handoff,status:'completed',success:mode!=='denied',result:'Current task receipt'}}})
+        if(['pending-tool','pending-command'].includes(mode)){
+          await new Promise(resolve=>setTimeout(resolve,20))
+          expect(ended).toBe(false);expect(interrupts).toBe(0)
+          expect(runtime.items.has(pending.id)).toBe(true)
+          await emit({method:'item/completed',params:{...p,item:{...pending,status:'completed',result:{content:[]},exitCode:0,aggregatedOutput:'Completed build'}}})
+        }
+        if(mode==='pending-child'){
+          await new Promise(resolve=>setTimeout(resolve,20));expect(ended).toBe(false);expect(interrupts).toBe(0)
+          await emit({method:'turn/completed',params:{threadId:'child',turnId:'child-1',turn:{id:'child-1',status:'completed'}}})
+        }
+        if(mode==='denied'){
+          expect(interrupts).toBe(0)
+          await emit({method:'turn/completed',params:{...p,turn:{id:'turn-1',status:'interrupted'}}})
+        }
+      }
+    }
+    const error=await submitted
+    if(['accepted','normal-finish','pending-tool','pending-command','pending-child','receipt-exit','restored-ready'].includes(mode)){
+      expect(error).toBeNull();expect(interrupts).toBe(1)
+      expect(f.events.some(e=>e.eventType==='assistant.message'&&e.text===ready)).toBe(true)
+    }else{
+      expect(error?.message).toContain(mode==='cleanup-failed'?'Actual cleanup failure':mode==='native-failed'?'Actual upstream failure':'interrupted')
+      expect(f.events.some(e=>e.eventType==='assistant.message'&&e.text===ready)).toBe(false)
+    }
+    const calls=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(x=>JSON.parse(x))
+    if(mode==='restored-ready')expect(calls.find(c=>c.method==='turn/start').params.input).toEqual([])
+    expect(calls.some(c=>c.method==='thread/goal/set')).toBe(false)
+  }finally{controller.abort();await f?.close();rpc.mockRestore()}
+},10000)
+
+test('an unavailable user HTTP MCP does not prevent a new or cold-resumed Agent from running', async () => {
+  const servers = [
+    { id: 'search', name: 'Search', enabled: true, autoStart: true, scope: 'global', transport: 'http', url: 'https://127.0.0.1/mcp?key=private' },
+    { id: 'browser', name: 'Browser', enabled: true, autoStart: true, scope: 'global', transport: 'stdio', command: '/fixture/browser' },
+  ]
+  for (const resumed of [false, true]) {
+    const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(servers) },
+      resolveOutboundTarget, resumed ? '019a0000-0000-7000-8000-000000000001' : undefined)
+    try {
+      await f.submit('hello')
+      const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      const start = rpc.find(call => call.method === (resumed ? 'thread/resume' : 'thread/start'))
+      expect(start.params.config.mcp_servers).toHaveProperty('bgs-browser')
+      expect(start.params.config.mcp_servers).not.toHaveProperty('bgs-search')
+      expect(JSON.stringify(rpc)).toContain('bgs-search: address_not_public')
+      expect(JSON.stringify(rpc)).not.toContain('key=private')
+      expect(start.params.approvalPolicy).toBe('on-request')
+      expect(f.events.filter(event => event.eventType.startsWith('assistant.')).map(event => event.text).join('')).toBe('Hello Bgs')
+    } finally { await f.close() }
+  }
+})
+
+
+test.each([{config:{features:{default_mode_request_user_input:false}},native:false},{config:{tools:{experimental_request_user_input:{enabled:false}}},native:false},{config:{tools:{experimental_request_user_input:{}}},native:true}])(
+  'native question settings honor explicit opt-outs and the official empty-table default: %j',async({config,native})=>{
+    const original=BgsClient.prototype.request
+    const spy=spyOn(BgsClient.prototype,'request').mockImplementation(async function(this:BgsClient,method:string,params:any):Promise<any>{
+      if(method==='config/read')return {config,origins:{},layers:[{name:{type:'user',file:'/fixture/config.toml'},version:'fixture',config}]}
+      return original.call(this,method,params)
+    })
+    let f:Awaited<ReturnType<typeof fixture>>|undefined
+    try {
+      f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt'})
+      const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      const start=trace.find(call=>call.method==='thread/start')
+      if(native)expect(start.params.config['features.default_mode_request_user_input']).toBe(true)
+      else expect(start.params.config).not.toHaveProperty('features.default_mode_request_user_input')
+      expect(start.params.dynamicTools.map((tool:any)=>tool.name)).toEqual(native?[]:['AskUserQuestion'])
+    }finally{await f?.close();spy.mockRestore()}
+  })

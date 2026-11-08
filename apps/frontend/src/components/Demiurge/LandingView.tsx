@@ -52,6 +52,7 @@ import {
 } from '../../services/beeGameAdapter';
 
 import { useCredits } from '../../hooks/useCredits';
+import { useToastContext } from '../../contexts/ToastContext';
 import {
   clearSupabaseSession,
   isSupabaseAuthConfigured,
@@ -230,7 +231,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   );
   const [settingsGroup, setSettingsGroup] = useState(0);
   const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings ? { ...restoredIntakeFlow.settings, orientation: restoredIntakeFlow.settings.orientation || 'Auto' } : null);
-  const [intakeError, setIntakeError] = useState('');
+  const { showError } = useToastContext();
   const [isIdeaFocused, setIsIdeaFocused] = useState(false);
   const [attachmentBuildAttachments, setAttachmentBuildAttachments] = useState<ChatAttachmentPayload[]>([]);
   const [creationMode, setCreationMode] = useState<CreationMode>(restoredIntakeFlow?.creationMode || readPendingAuthIdeaState()?.creationMode || restoredIdeaDraft?.creationMode || 'creative');
@@ -338,18 +339,18 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             ? selectedOption?.title || intakeText.modal.confirmBuildBrief
             : intakeText.modal.startBuild;
   const avatarMood: AvatarMood = intakePhase === 'generating_options' || intakePhase === 'starting_build'
-    ? 'thinking' : intakeError ? 'error' : intakePhase !== 'idle' ? 'ready'
+    ? 'thinking' : intakePhase !== 'idle' ? 'ready'
       : hasChosenMode && (isIdeaFocused || projectName.trim() || attachmentBuildAttachments.length) ? 'listening' : 'idle';
   const avatarHeading = isRealtimeBillingNoticeOpen ? translate('avatar.creditNotice') : intakePhase === 'generating_options' ? translate('avatar.thinkingTitle')
     : intakePhase === 'starting_build' ? intakeText.starting.title
     : intakePhase === 'options_ready' ? translate('avatar.optionsTitle')
-    : intakePhase === 'configuring_details' ? translate(`avatar.settingsGroups.${settingsGroup}.title`) : showIntakePanels ? modalTitle : intakeError ? translate('avatar.errorTitle') : hasChosenMode ? translate(creationMode === 'creative' ? 'avatar.creativePrompt' : 'avatar.blueprintPrompt') : undefined;
+    : intakePhase === 'configuring_details' ? translate(`avatar.settingsGroups.${settingsGroup}.title`) : showIntakePanels ? modalTitle : hasChosenMode ? translate(creationMode === 'creative' ? 'avatar.creativePrompt' : 'avatar.blueprintPrompt') : undefined;
   const avatarDescription = isRealtimeBillingNoticeOpen ? '' : intakePhase === 'generating_options' ? translate('avatar.thinkingDescription')
     : intakePhase === 'starting_build' ? intakeText.starting.description
     : intakePhase === 'options_ready' ? translate('avatar.optionsDescription')
     : intakePhase === 'configuring_details' ? translate(`avatar.settingsGroups.${settingsGroup}.description`)
     : intakePhase === 'confirming_brief' ? translate('avatar.confirmDescription')
-    : intakeError ? translate('avatar.errorDescription') : !hasChosenMode ? translate('avatar.chooseMode') : undefined;
+    : !hasChosenMode ? translate('avatar.chooseMode') : undefined;
 
   const setActiveProject = useProjectStore(state => state.setActiveProject);
   const currentUser = useSystemStore(state => state.currentUser);
@@ -416,7 +417,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   const startIntake = async (idea: string) => {
     if (!hasReferenceFiles()) return;
-    setIntakeError('');
     clearPendingIntakeFlowState();
     writePendingIdeaDraftState(idea, creationMode, requiredReferenceNames);
     await runIntake(idea);
@@ -440,7 +440,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIsLoginPromptOpen(false);
     const missingReferences = pendingAuthIdea.referenceNames?.filter(name => !attachmentBuildAttachments.some(file => (file.filename || 'image') === name)) || [];
     if (missingReferences.length) {
-      setIntakeError(lang.startsWith('zh') ? '登录跳转后请重新添加参考文件，再继续。' : 'Please reattach your references after signing in, then continue.');
+      showError(lang.startsWith('zh') ? '登录跳转后请重新添加参考文件，再继续。' : 'Please reattach your references after signing in, then continue.');
       return;
     }
     if (creationMode === 'blueprint') openBlueprintSettings(pendingAuthIdea.idea);
@@ -481,7 +481,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   }, [isInputMenuOpen]);
 
   const runIntake = async (idea: string) => {
-    setIntakeError('');
     setSelectedOption(null);
     setSettings(null);
     setIntakeOptions([]);
@@ -511,7 +510,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setIsPreparing(false);
       setIntakePhase('idle');
       setIsTransitioning(false);
-      setIntakeError(error instanceof Error ? error.message : translate('intake.errors.intakeFailed'));
+      showError(error instanceof Error ? error.message : translate('intake.errors.intakeFailed'));
       console.error('Failed to generate intake options:', error);
     }
   };
@@ -540,7 +539,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     if (!projectName.trim()) setProjectName(idea);
     writePendingIdeaDraftState(idea, creationMode, requiredReferenceNames);
     clearPendingIntakeFlowState();
-    setIntakeError('');
     setIsPreparing(true);
     const canGenerate = await ensureGenerationAccess();
     if (!canGenerate) {
@@ -724,7 +722,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   const handleProjectNameChange = (value: string) => {
     setProjectName(value);
-    setIntakeError('');
     writePendingIdeaDraftState(value, creationMode, requiredReferenceNames);
     if (intakePhase !== 'idle' && !isPreparing && !isTransitioning) {
       setIntakePhase('idle');
@@ -732,7 +729,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setSelectedOption(null);
       setSettings(null);
       clearPendingIntakeFlowState();
-      setIntakeError('');
     }
   };
 
@@ -744,7 +740,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIntakePhase('configuring_details');
     setIsInputMenuOpen(false);
     persistIntakeFlow('configuring_details', intakeOptions, option, nextSettings);
-    setIntakeError('');
   };
 
   const updateSettings = (patch: Partial<BeeGameIntakeSettings>) => {
@@ -779,11 +774,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const handleConfirmSettings = () => {
     if (!selectedOption || !settings) return;
     if (!hasRequiredProductionSettings(settings)) {
-      setIntakeError(intakeText.errors.missingProductionSettings);
+      showError(intakeText.errors.missingProductionSettings);
       setSettingsGroup(!settings.platform || !settings.engine || !settings.dimension || (!['VR', 'AR'].includes(settings.dimension) && !settings.orientation) ? 0 : !settings.genre || !settings.visualStyle || !settings.inputs.length ? 1 : 2);
       return;
     }
-    setIntakeError('');
     setIsInputMenuOpen(false);
     setIntakePhase('confirming_brief');
     persistIntakeFlow('confirming_brief', intakeOptions, selectedOption, settings);
@@ -809,13 +803,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setSelectedOption(null);
     setSettings(null);
     setIsInputMenuOpen(false);
-    setIntakeError('');
     // Closing settings does not discard the user's original reference files.
     clearIntakeRecoveryState();
   };
 
   const startConfirmedBuild = async (brief: BeeGameBuildBrief) => {
-    setIntakeError('');
     setIsPreparing(true);
     setIntakePhase('starting_build');
     try {
@@ -826,7 +818,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     } catch (error) {
       setIsPreparing(false);
       setIntakePhase('confirming_brief');
-      setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
+      showError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
       console.error('Failed to start confirmed project:', error);
     }
   };
@@ -834,7 +826,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const hasReferenceFiles = (): boolean => {
     const missing = requiredReferenceNames.filter(name => !attachmentBuildAttachments.some(file => (file.filename || 'image') === name));
     if (missing.length) {
-      setIntakeError(`${lang.startsWith('zh') ? '刷新后请返回输入重新添加参考文件：' : 'Return to input and reattach references after refreshing: '}${missing.join(', ')}`);
+      showError(`${lang.startsWith('zh') ? '刷新后请返回输入重新添加参考文件：' : 'Return to input and reattach references after refreshing: '}${missing.join(', ')}`);
       return false;
     }
     return true;
@@ -843,7 +835,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const handleStartBuild = async () => {
     if (!selectedOption || !settings || isTransitioning || isPreparing || !hasReferenceFiles()) return;
     if (!hasRequiredProductionSettings(settings)) {
-      setIntakeError(intakeText.errors.missingProductionSettings);
+      showError(intakeText.errors.missingProductionSettings);
       setSettingsGroup(0);
     setIntakePhase('configuring_details');
       return;
@@ -873,7 +865,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       gameUserVisibleLanguage: lang,
       agentResponseLanguage: lang,
     };
-    setIntakeError('');
     setIsPreparing(true);
     try {
       // This path can be reached from a persisted Brief after a refresh.
@@ -889,7 +880,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       }
       await startConfirmedBuild(brief);
     } catch (error) {
-      setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
+      showError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
       console.error('Failed to start build:', error);
     } finally {
       setIsPreparing(false);
@@ -910,7 +901,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const dialogueBack = isRealtimeBillingNoticeOpen ? { label: intakeText.actions.cancel, onClick: handleCancelRealtimeBilling }
-            : intakePhase === 'configuring_details' ? { label: settingsGroup ? translate('avatar.back') : creationMode === 'blueprint' ? (lang.startsWith('zh') ? '返回输入' : 'Back to input') : intakeText.actions.chooseAgain, onClick: () => { setIsInputMenuOpen(false); setIntakeError(''); if (settingsGroup) setSettingsGroup(value => value - 1); else handleBackToOptions(); } }
+            : intakePhase === 'configuring_details' ? { label: settingsGroup ? translate('avatar.back') : creationMode === 'blueprint' ? (lang.startsWith('zh') ? '返回输入' : 'Back to input') : intakeText.actions.chooseAgain, onClick: () => { setIsInputMenuOpen(false); if (settingsGroup) setSettingsGroup(value => value - 1); else handleBackToOptions(); } }
             : intakePhase === 'confirming_brief' ? { label: intakeText.actions.edit, onClick: () => { setSettingsGroup(2); setIntakePhase('configuring_details'); } }
             : intakePhase === 'options_ready' ? { label: intakeText.modal.close, onClick: handleCloseIntake }
             : intakePhase === 'idle' && hasChosenMode ? { label: translate('avatar.changeMode'), onClick: () => setHasChosenMode(false), disabled: isPreparing } : undefined;
@@ -937,7 +928,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                   inputMenuRef={inputMenuRef}
                   inputMenuButtonRef={inputMenuButtonRef}
                   group={settingsGroup}
-                  onNext={() => { setIsInputMenuOpen(false); setIntakeError(''); setSettingsGroup(value => value + 1); }}
+                  onNext={() => { setIsInputMenuOpen(false); setSettingsGroup(value => value + 1); }}
                   onConfirm={handleConfirmSettings}
                 />
               ) : null}
@@ -1217,7 +1208,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           /> : null}
 
           </div>
-          {intakeError ? <p role="alert" className="mt-4 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-foreground">{intakeError}</p> : null}
 
           {intakePanels}
         </AvatarDialogue> : <div className={classicStyles.stage}>
@@ -1272,7 +1262,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           </motion.div> : null}
           </AnimatePresence>
           </div>
-          {intakeError && !showIntakePanels ? <p role="alert" className="mt-4 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-foreground">{intakeError}</p> : null}
         </div>}
       </main> : <LandingContentPage page={landingPage} language={lang} onBack={() => navigateLandingPage('home')} />}
       {landingPage === 'home' && !desktop ? (
@@ -1297,7 +1286,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           </div>
           {avatarDescription ? <p className={avatarStyles.description}>{avatarDescription}</p> : null}
           <div className={avatarStyles.content}>{intakePanels}</div>
-          {intakeError ? <p role="alert" className="text-sm text-destructive">{intakeError}</p> : null}
           </motion.div>
           </AnimatePresence>
         </DialogContent>

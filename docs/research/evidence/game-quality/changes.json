@@ -1,0 +1,48 @@
+[
+  {
+    "file": ".beegame/skills/bgs-game-skills/game-creative-director-expert/SKILL.md",
+    "beforeBytes": 1843,
+    "afterBytes": 2033,
+    "beforeSha256": "8a6b166fab027837243e2c9fae0fa646b591c9c14fba7f9880a1c8fba91c0452",
+    "afterSha256": "01709983e0b350e99c7c7737bf7a91016931d37e85f92bef613d6a3743d5732c"
+  },
+  {
+    "file": ".beegame/skills/bgs-game-skills/game-art-director-expert/SKILL.md",
+    "beforeBytes": 4006,
+    "afterBytes": 4199,
+    "beforeSha256": "33111e0eea574b48a0a0272b5a68b974cd7575934969bcca43e6a5aeb2f28833",
+    "afterSha256": "3dd5373fcf681d8a0c44aa28521c390ddab53ffb37ea71f80276ad6bd5848fd0"
+  },
+  {
+    "file": ".beegame/skills/bgs-game-skills/game-audio-designer/SKILL.md",
+    "beforeBytes": 3105,
+    "afterBytes": 3396,
+    "beforeSha256": "fa2978646507a0797526577e43dd67f726fd777f353935f1d57bb3cd5ba2aacb",
+    "afterSha256": "392d6446682b7d8853d59abd636e23b9c8eb02d07e43aeae49855fef454b3ecd"
+  },
+  {
+    "file": ".beegame/skills/bgs-game-skills/game-playtest-performance/references/experience-validation.md",
+    "beforeBytes": 3740,
+    "afterBytes": 4003,
+    "beforeSha256": "48ee711d8a4c5818c66fc56245be017c45cb55158d00eb8a665bb707e34bdb4b",
+    "afterSha256": "18c3a7b44da1ebe59967b2c6464813988b2291fd5dddf687f16371fa4159f012"
+  },
+  {
+    "file": ".beegame/skills/bgs-game-skills/game-art-director-expert/references/camera-framing.md",
+    "beforeBytes": 0,
+    "afterBytes": 3947,
+    "afterSha256": "9f153c18c5019c5a8167b02d6f87c2080206eac5763ea33ddfc7c4a0b915508b"
+  },
+  {
+    "file": "docs/research/game-quality-audit.md",
+    "beforeBytes": 0,
+    "afterBytes": 13106,
+    "afterSha256": "ef10c9902131e0a3740b58a4ed4e97d18d38b051bcf596e4411ad299c6fbf371"
+  },
+  {
+    "file": ".beegame/skills/bgs-game-skills/game-creative-director-expert/references/runtime-critique.md",
+    "beforeBytes": 0,
+    "afterBytes": 3364,
+    "afterSha256": "b0978f1adc95e8a6df53f0bb9167f8b487a482241c8a562176c7be542ffa6e67"
+  }
+]

@@ -3,7 +3,7 @@ import { resolve, relative } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { ZodError } from 'zod/v4'
-import { artifactDigest } from '../runtime-acceptance'
+import { artifactDigest, readArtifactSnapshot } from '../runtime-acceptance'
 import { contentIndexSchema, contentDocumentSchema, isContentEntryKind } from '../game-content-schema'
 import { createPreviewTestBrowser } from '../preview-test-browser'
 import { previewTestHostDocument } from '@bee-game-studio/agent-workflow/preview-environment'
@@ -45,10 +45,11 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
   const hasTouch = Array.isArray(constraints.inputs) && constraints.inputs.includes('Touch')
   try {
     if (signal?.aborted) throw new Error('Check cancelled')
-    const artifact = task.runtimeArtifact, paths = await staticArtifactFiles(root, artifact)
+    const artifact = task.runtimeArtifact, snapshot = await readArtifactSnapshot(root, artifact)
+    const paths = [...snapshot.files.keys()]
     if (!paths.includes(artifact+'/index.html')) { result.observation = 'Static build has no index.html'; return result }
-    result.artifacts = [{ path: artifact, sha256: await artifactDigest(root, artifact, true) }]
-    const versions = await Promise.all(paths.map(file => readVersion(root, file)))
+    result.artifacts = [{ path: artifact, sha256: snapshot.sha256 }]
+    const versions = [...snapshot.files].map(([path,sha256])=>({path,sha256}))
     result.inputs = [...new Map([...inputs, ...versions].map(file => [file.path, file])).values()]
     result.coverage = { files: paths, limitations: [
       'Measured static build only; not published deployment, server/native/XR behavior or installation/export completeness.',

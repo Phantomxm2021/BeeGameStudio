@@ -12,10 +12,8 @@ import { createRun, digest, WorkflowError, type Run, type AgentTurn } from './st
 import { sameJson, type WorkflowStore } from './store'
 import { readContentView } from './content-view'
 import { versionsMatch } from './checks'
-import type { MeasuredPreviewManager } from './measured-preview'
-import { exportAgentMeasuredBuild, selectAgentMeasuredBuild, inspectAgentMeasurementInputs } from './measured-build'
+import type { StaticPreviewManager } from './static-preview'
 import { mergeDeploymentRecords, type BeeGameDeploymentManager, type BeeGameDeploymentRecord } from '../deployment-manager'
-import { measurementSummary, activeUserTask, agentSkillFacts } from './agent-measurement'
 import { agentGoalSchema, agentMessageSchema, createAgentGoalExecutor } from './agent-goal'
 import type { AgentImageAccess } from './agent-tools'
 import { auditEventPage } from './event-page'
@@ -33,7 +31,7 @@ function imageScreenOrientation(run: Run): 'Landscape' | 'Portrait' | undefined 
 }
 
 export function registerV3Routes(app: Hono, input: {
-  store?: WorkflowStore; sessions: BeeGameSessionManager; preview?: MeasuredPreviewManager; exitReceipts?: HostExitReceipts;
+  store?: WorkflowStore; sessions: BeeGameSessionManager; preview?: StaticPreviewManager; exitReceipts?: HostExitReceipts;
   deployment?: () => BeeGameDeploymentManager;
   capturePublicationCover?: (previewUrl: string) => Promise<Buffer>;
   capturePublicationCovers?: (previewUrl: string) => Promise<Buffer[]>;
@@ -50,6 +48,7 @@ export function registerV3Routes(app: Hono, input: {
   registerCleanup?: (fn: () => Promise<void>) => void;
   resourceLibraryBaseUrl?: string;
   developmentPreview?: () => BeeGamePreviewManager;
+  stopDevelopmentPreview?(request: Request, user: BeeGameUserContext, projectId: string, workspacePath: string): Promise<void>;
   openAgentImage?: (value: {request: Request; user: BeeGameUserContext; projectId: string; workspacePath: string; sessionId: string; modelConfigId?: string; confirmedRequirements: string; requireGdd: boolean; visualHandoffVersion?: 1; screenOrientation?: 'Landscape' | 'Portrait'}) => AgentImageAccess | Promise<AgentImageAccess>;
 }) {
   const executor = input.store ? createV3Executor({ store: input.store, sessions: input.sessions, exitReceipts:input.exitReceipts }) : undefined
@@ -116,7 +115,6 @@ export function registerV3Routes(app: Hono, input: {
     } catch (error) { const result = routeError(error); return c.json({ error: result.error, code: result.code }, result.status) }
   })
 
-  const agentSelection = z.object({measurementId:z.string().uuid(),requirementsRevision:z.string().min(1)}).strict()
   // Ordinary Preview is a candidate runtime, not measured delivery. Keep it
   // out of both measurement selection and legacy session/model restoration.
   for (const suffix of ['preview', 'preview/restart', 'deployment-readiness', 'deployments']) {
@@ -194,6 +192,7 @@ export function registerV3Routes(app: Hono, input: {
           state = { preview: await input.preview.openCandidate(ctx.run) }
         } else if (c.req.method === 'DELETE') {
           if (state.preview) input.preview.closeCandidate(project.id, user.id, state.preview.id)
+          await input.stopDevelopmentPreview?.(c.req.raw, user, project.id, ctx.workspace)
           state = { preview: null }
         }
         return c.json({sessionId:ctx.run.chatSessionId,workspacePath:ctx.run.workspacePath,
@@ -202,83 +201,23 @@ export function registerV3Routes(app: Hono, input: {
       } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
     })
   }
-  app.get(prefix+'/agent/measurements/:measurement',async c=>{
-    c.header('Cache-Control','no-store')
-    try {
-      const ctx=await current(c.req.raw,c.req.param('id')!,false),id=c.req.param('measurement')!
-      const turn=ctx.run.agentTurns?.find(t=>t.measurements?.some(m=>m.id===id)),record=turn?.measurements?.find(m=>m.id===id)
-      if(!turn || !record)throw new WorkflowError('measurement-not-found','No host measurement with this identity',404)
-      // Input identity remains inspectable even when the writer/exit state
-      // forbids selection. Never turn those diagnostics into export permission.
-      const inputs=await inspectAgentMeasurementInputs(ctx.run,record)
-      let freshness={...inputs,inputsCurrent:inputs.current}
-      let selection:{eligible:boolean;code?:string;reason?:string}={eligible:true}
-      try {await selectAgentMeasuredBuild(ctx.run,id,input.sessions.hasActiveProjectTurn(ctx.user.id,ctx.project.id,ctx.workspace))}
-      catch(error) {
-        if(!(error instanceof WorkflowError))throw error
-        selection={eligible:false,reason:error.message,code:error.code}
-        freshness={...freshness,current:false,reason:error.message,code:error.code}
-      }
-      let previewSelection:{eligible:boolean;code?:string;reason?:string}={eligible:true}
-      try {await selectAgentMeasuredBuild(ctx.run,id,input.sessions.hasActiveProjectTurn(ctx.user.id,ctx.project.id,ctx.workspace),'preview')}
-      catch(error) {
-        if(!(error instanceof WorkflowError))throw error
-        previewSelection={eligible:false,reason:error.message,code:error.code}
-      }
-      const currentTurn=ctx.run.agentTurns!.at(-1)!
-      return c.json({...measurementSummary(record),freshness,selection,previewSelection,
-        task:activeUserTask(ctx.run,currentTurn),skills:agentSkillFacts(ctx.run,currentTurn),
-        measurementTask:{attemptId:turn.attemptId,requestKey:turn.requestKey,status:turn.status,requirementsRevision:turn.requirementsRevision},
-        execution:{attemptId:turn.attemptId,sessionId:turn.sessionId,turnId:turn.turnId,nativeSessionId:turn.nativeSessionId,status:turn.status},
-        currentRequirements:ctx.run.requirements})
-    }catch(error){const detail=routeError(error);return c.json(detail,detail.status)}
-  })
-  app.post(prefix+'/export', async c => {
+  // Retired online measurements must not load historical Runs or recompute
+  // delivery eligibility. Saved history and offline export verification remain.
+  for (const [method, suffix, permission] of [
+    ['GET', '/agent/measurements/:measurement', 'project.read'],
+    ['POST', '/export', 'project.export'],
+    ['GET', '/preview', 'project.read'],
+    ['POST', '/preview', 'preview.manage'],
+    ['DELETE', '/preview', 'preview.manage'],
+  ] as const) app.on(method, prefix + suffix, async c => {
     c.header('Cache-Control', 'private, no-store')
     try {
-      const ctx = await current(c.req.raw, c.req.param('id')!, false)
-      if (!hasBeeGamePermission(ctx.user, 'project.export')) throw new WorkflowError('permission-denied', 'Export permission denied', 403)
-      const kind={kind:z.enum(['static','project']).optional()}
-      const body = agentSelection.extend(kind).parse(await input.readBody(c.req.raw))
-      if (body.requirementsRevision!==ctx.run.requirements.revision)
-        throw new WorkflowError('revision-conflict', 'Read the current version before exporting')
-      const guard = {
-        read: () => ctx.store.read(ctx.project.id, ctx.user.id),
-        busy: (run:Run) => input.sessions.hasActiveProjectTurn(run.ownerId, run.projectId, run.workspacePath),
-      }
-      const result = await exportAgentMeasuredBuild(ctx.run,body.measurementId,guard,body.kind)
-      return new Response(new Uint8Array(result.data), { headers: { 'Content-Type': 'application/zip', 'Cache-Control': 'private, no-store',
-        'Content-Disposition': 'attachment; filename="'+result.filename+'"', 'X-Content-Type-Options': 'nosniff',
-        'X-BGS-Artifact-SHA256': result.artifact.sha256, 'X-BGS-Export-Kind': result.kind } })
-    } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
-  })
-  app.get(prefix+'/preview', async c => {
-    c.header('Cache-Control', 'no-store')
-    try {
-      const ctx = await current(c.req.raw, c.req.param('id')!, false)
-      return c.json(await input.preview?.status(ctx.project.id, ctx.user.id) ?? { preview: null })
-    } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
-  })
-  app.post(prefix+'/preview', async c => {
-    c.header('Cache-Control', 'no-store')
-    try {
-      const ctx = await current(c.req.raw, c.req.param('id')!, false)
-      if (!hasBeeGamePermission(ctx.user, 'preview.manage')) throw new WorkflowError('permission-denied', 'Preview permission denied', 403)
-      if (!input.preview) throw new WorkflowError('preview-unavailable', 'Measured Preview is not configured', 503)
-      const body = agentSelection.parse(await input.readBody(c.req.raw))
-      if(body.requirementsRevision!==ctx.run.requirements.revision)
-        throw new WorkflowError('revision-conflict','Read current requirements before opening Preview')
-      return c.json({ preview: await input.preview.openAgent(ctx.run,body.measurementId) })
-    } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
-  })
-  app.delete(prefix+'/preview', async c => {
-    c.header('Cache-Control', 'no-store')
-    try {
-      const ctx = await current(c.req.raw, c.req.param('id')!, false)
-      if (!hasBeeGamePermission(ctx.user, 'preview.manage')) throw new WorkflowError('permission-denied', 'Preview permission denied', 403)
-      const body = z.object({ id: z.string().min(1) }).strict().parse(await input.readBody(c.req.raw))
-      input.preview?.close(ctx.project.id, ctx.user.id, body.id)
-      return c.json({ preview: null })
+      const user = input.getUser(c.req.raw)
+      if (!hasBeeGamePermission(user, 'project.read') || !hasBeeGamePermission(user, permission))
+        throw new WorkflowError('permission-denied', 'Project permission denied', 403)
+      if (!await input.getProject(c.req.raw, user, c.req.param('id')!))
+        throw new WorkflowError('project-not-found', 'Owned project not found', 404)
+      return c.json({code:'measurement-retired', error:'Online measurement Preview and export are retired. Use the project Preview, package download or publication.'}, 410)
     } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
   })
   app.get(prefix, async c => {
@@ -327,7 +266,7 @@ export function registerV3Routes(app: Hono, input: {
         run=createRun({projectId:ctx.project.id,ownerId:ctx.user.id,workspacePath:ctx.workspace,
           chatSessionId:body.chatSessionId,requestKey:body.requestKey,text,constraints,ids:['goal']})
         run.creation=await observeProjectCreation(ctx.workspace,body.brief)
-        if(run.creation?.initialDelivery==='complete-game')run.productionWorkflow=1
+        if(run.creation?.initialDelivery==='complete-game') run.productionWorkflow=1
         await ctx.store.commit(ctx.project.id,ctx.user.id,0,run,'agent.goal-confirmed')
       }
       // Persist mode before any model dispatch; retry can reconcile this same
@@ -339,6 +278,7 @@ export function registerV3Routes(app: Hono, input: {
         await initializeProjectGuide(ctx.workspace)
       const turn=await ctx.agentExecutor.start(run,{
         developmentPreview: hasBeeGamePermission(ctx.user, 'preview.manage') ? input.developmentPreview : undefined,
+        previewOrigin: new URL(request.url).origin,
         openImage:input.openAgentImage ? imageContext=>input.openAgentImage!({request,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:run.chatSessionId,modelConfigId:chat.modelConfigId,confirmedRequirements:imageContext.requirements,requireGdd:imageContext.requireGdd,visualHandoffVersion:run.visualHandoffVersion,screenOrientation:imageScreenOrientation(run)}) : undefined,
         modelConfigId:chat.modelConfigId,language:body.brief.agent_response_language,
         userDataRoot:input.getUserDataRoot?.(request),
@@ -363,6 +303,7 @@ export function registerV3Routes(app: Hono, input: {
         throw new WorkflowError('invalid-chat-binding','Restore this project’s bound native Chat before continuing production',400)
       const turn=await ctx.agentExecutor.continueProduction(ctx.run,body.afterAttemptId,{
         developmentPreview: hasBeeGamePermission(ctx.user, 'preview.manage') ? input.developmentPreview : undefined,
+        previewOrigin: new URL(c.req.url).origin,
         modelConfigId:chat.modelConfigId,userDataRoot:input.getUserDataRoot?.(c.req.raw),
         authToken:input.getAuthToken(c.req.raw),getValidAuthToken:input.getValidAuthToken(c.req.raw),
         openImage:input.openAgentImage ? imageContext=>input.openAgentImage!({request:c.req.raw,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:ctx.run.chatSessionId,modelConfigId:chat.modelConfigId,confirmedRequirements:imageContext.requirements,requireGdd:imageContext.requireGdd,visualHandoffVersion:ctx.run.visualHandoffVersion,screenOrientation:imageScreenOrientation(ctx.run)}) : undefined,
@@ -386,6 +327,7 @@ export function registerV3Routes(app: Hono, input: {
       await input.persistMode(c.req.raw,ctx.user,ctx.project,ctx.run)
       const turn=await ctx.agentExecutor.message(ctx.run,body,{
         developmentPreview: hasBeeGamePermission(ctx.user, 'preview.manage') ? input.developmentPreview : undefined,
+        previewOrigin: new URL(c.req.url).origin,
         attachments,
         openImage:input.openAgentImage ? imageContext=>input.openAgentImage!({request:c.req.raw,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:ctx.run.chatSessionId,modelConfigId:chat.modelConfigId,confirmedRequirements:imageContext.requirements,requireGdd:imageContext.requireGdd,visualHandoffVersion:ctx.run.visualHandoffVersion,screenOrientation:imageScreenOrientation(ctx.run)}) : undefined,
         modelConfigId:chat.modelConfigId,
@@ -462,7 +404,7 @@ export function registerV3Routes(app: Hono, input: {
     } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
   })
   return { startAgentGoal,
-    hasLiveAgentWriter: (run: Run) => agentExecutor?.writerLiveness(run) === 'local-active',
+    hasLiveAgentWriter: (run: Pick<Run, 'writer'>) => agentExecutor?.writerLiveness(run) === 'local-active',
     async contentView(request: Request, projectId: string, metadata: boolean) {
     const user = input.getUser(request)
     if (!hasBeeGamePermission(user, 'project.read')) throw new WorkflowError('permission-denied', 'Project permission denied', 403)
@@ -477,14 +419,6 @@ export function registerV3Routes(app: Hono, input: {
         (snapshot.state === 'draft' && !await versionsMatch(ctx.workspace, snapshot.sourceVersions)))
       throw new WorkflowError('content-changed', 'Saved content changed while loading; refresh and retry', 409)
     return { ...snapshot, readOnly: true, note: 'Historical saved content is read-only; Scene/UI implementation uses the selected engine sources.' }
-  }, async saveContent(request: Request, projectId: string, value: unknown) {
-    const user = input.getUser(request), project = await input.getProject(request, user, projectId)
-    if (!project?.root_path) throw new WorkflowError('project-not-found', 'Owned project workspace not found', 404)
-    const stored = await input.store?.read(projectId, user.id)
-    if (!stored && project.runtime_snapshot?.workflow_protocol !== 'bgs.workflow.v3') return undefined
-    const ctx = await current(request, projectId, true)
-    if (!hasBeeGamePermission(user, 'project.create')) throw new WorkflowError('permission-denied', 'Source editing permission denied', 403)
-    throw new WorkflowError('editor-unavailable', 'BGS Scene/UI editing has been retired; use the selected engine sources', 409)
   }, async assertLegacy(projectId: string, ownerId: string, request: Request) {
     const project = await input.getProject(request, input.getUser(request), projectId)
     if (project?.runtime_snapshot?.workflow_protocol === 'bgs.workflow.v3' || (project && input.store && await input.store.read(projectId, ownerId)))

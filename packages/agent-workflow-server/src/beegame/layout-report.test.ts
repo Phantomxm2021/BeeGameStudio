@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { formatLayoutReport, retainLayoutReport } from './layout-report'
 import { writeDesignDocumentsFixture, uiLayoutFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
-import { sharedContentChecker, CONTENT_CHECKER_ENTRY } from './content-checker-runtime'
+import { CONTENT_CHECKER_ENTRY } from './game-content-validation-cli'
 import { writeFileSync } from 'node:fs'
 
 test('report groups identical failures without dropping scenes, geometry, conditions or unmatched issues', () => {
@@ -75,7 +75,7 @@ test('actual materialized CLI report preserves failure exit, raw coverage and au
     await writeDesignDocumentsFixture(root)
     mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
     writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
-    const runtime = await sharedContentChecker()
+    const runtime = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
     for (const [height, expected] of [[28, 1], [52, 0]] as const) {
       const path = join(root, 'content/ui/menu.json'), body = JSON.stringify(uiLayoutFixture(height))
       writeFileSync(path, body)
@@ -100,7 +100,7 @@ test('Scene CLI report covers all sources and unique viewports without agent-sid
     await writeDesignDocumentsFixture(root)
     mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
     writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
-    const runtime = await sharedContentChecker()
+    const runtime = { moduleUrl: new URL('./game-content-validation-cli.ts', import.meta.url).href }
     for (const body of ['{', JSON.stringify(sceneLayoutFixture())]) {
       writeFileSync(join(root, 'content/scenes/level.json'), body)
       const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'),

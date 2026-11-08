@@ -1,0 +1,464 @@
+{
+  "status": "observed",
+  "project": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/apple-catch-audited--e33ebb62cf3a",
+  "scope": "Read-only baseline of an existing BGS build, not application of the revised Skills",
+  "durationMs": 8634,
+  "sourceBefore": {
+    "index.html": "be4dc2cfeaf1f8b37db17768b91097bd32bc8d407432364e89e9ba2f681b0c23",
+    "assets/apples-CX4ZV6Hg.png": "c48909db4a2f5df222faa110e55d97f285b7818f902fea20473544b00e80807a",
+    "assets/catch-07-DUAhuqKH.wav": "520fe545c9b37861d976b8557b3788965ab9fd9380ec16cf8c98f96f9ca7a228",
+    "assets/feedback.atlas-D6rXBmGl.json": "ebe79bb98a56cf57d89b5fe07de9e8a1e59284bf31a7ae0f322194814b879a70",
+    "assets/index-kSyMvxHt.css": "fd70c4b14f393eba5703b62819fa9b7f9f010f0902926355d0904949b5cf9ad8",
+    "assets/catch-09-DUTC9O2i.wav": "7788ba987b69c94f3ba24061d2730cdce5b129ac14a029978adce4b42499a702",
+    "assets/music-theme-DEFR5fGd.wav": "3f75a6fd430977ca8c2f90f0ae2e094fe78a509c6c431d1909b64327d3f19f57",
+    "assets/catch-01-B8dNW9eY.wav": "e02165d1b2f3cb24720289316840a045b86cc1d89f9679ae3415415197696e5a",
+    "assets/miss-CnlqvdBg.wav": "02f383b56508f242fad1b5e81945871aa97d15d3e62c427d8674113c74d3aa8b",
+    "assets/ui-click-CkZgtdnv.wav": "35eca3cd62df887697ccbec7194376e2b5a2faa1ee146dacee640cbb488cb6af",
+    "assets/feedback-C0x0vrTJ.png": "54a530966c4e1d307baa1b784decfe40022fac51221fec1a8be14a7ac8140d35",
+    "assets/zcool-kuaile-game-DnjX8NZd.woff2": "29bbd5b1422242d14660b6a7e3835414adfd53a75dbabb2088d2ae29dba2e542",
+    "assets/catch-06-BzCx4lZX.wav": "7688a41c176948d0c5c02968d56dec385e6cff87583ef14d78537a51aa359246",
+    "assets/catch-08-K4KmgQix.wav": "bc625261041dd9ea617c1faf35bfa43eb16adbcfb54d3f6e00437d55eeb83635",
+    "assets/failure-rwyfGNgT.wav": "35cc765ea53f8f80840610d09fa35b80cafb2b07346c61890143931941107ad1",
+    "assets/baskets.atlas-BOLmFQqb.json": "8ec94123189c3026df012afb84c040b9fe1d3ac33c5ff89e84175989b539c4cd",
+    "assets/catch-02-5y5TFcKz.wav": "237b8a79788dddb72895f5ebcb999c8a5a714c19648cfa863a722867f0be77f8",
+    "assets/victory-ByMtsyUr.wav": "5c31c305708ba4dd18bb39604b0ddd0c3e325c87770863fde1ac79310417d102",
+    "assets/catch-05-CVcNSzHs.wav": "c20161dee2cfb6afc99a99a325710fb472a455d6e6a08abec61205f42dc251d6",
+    "assets/ui-toggle-Q57yqO3e.wav": "0fe1ed7d0a65eb1aaa2e42678e0c458057be4ba8c88b7d1deeefa8dbc2992be3",
+    "assets/ui-skins-DfdNA7Ho.png": "76e50668bacdd85a7986d74bd4651582422ccb5e59398cfeefa78695aa366941",
+    "assets/catch-04-CR_5HDjF.wav": "9c32ef16160efa0c124be3c914dc5aea73f84767f001c8aa7ba04b04bb47d66a",
+    "assets/orchard-backdrop-BCkXt388.png": "f29c0f60b9894243de10e3387b4d67bb2ae10d381d52be0c6ca7842bc645f2b0",
+    "assets/catch-03-Bzf1kjW5.wav": "533e4ab438b2ebc3d4bb25685a3e0ca04364c6d97a4b41fbbdf6a983140437ff",
+    "assets/apples.atlas-AiRL-7dt.json": "91cc03f3b6115ee704ee36b23e31f4d03103d146690b65b66cc93ac4fbf8815e",
+    "assets/noto-sans-sc-game-C4or3IqV.woff2": "a0f88a76a0ef907f245152d77c2a80fda6705159d6b990f1332484e1ae93ea77",
+    "assets/baskets-1ca5g3mR.png": "b32ba68af8b5bffc979a4e2f0437216dd42a6c7831428ba74c307e754bfa33ef",
+    "assets/index-Bj8ysIWm.js": "507c880197f7c70346fcfbd1a0baf6c659aae659a9ddd2954bcb4271f09f76b8",
+    "assets/catch-10-CSEiPKsN.wav": "f64a2f8eb05ffadaf7b1f1e1a9d37640b6c9b0b59b9e07a7af83ad522f9036da"
+  },
+  "sourceAfter": {
+    "index.html": "be4dc2cfeaf1f8b37db17768b91097bd32bc8d407432364e89e9ba2f681b0c23",
+    "assets/apples-CX4ZV6Hg.png": "c48909db4a2f5df222faa110e55d97f285b7818f902fea20473544b00e80807a",
+    "assets/catch-07-DUAhuqKH.wav": "520fe545c9b37861d976b8557b3788965ab9fd9380ec16cf8c98f96f9ca7a228",
+    "assets/feedback.atlas-D6rXBmGl.json": "ebe79bb98a56cf57d89b5fe07de9e8a1e59284bf31a7ae0f322194814b879a70",
+    "assets/index-kSyMvxHt.css": "fd70c4b14f393eba5703b62819fa9b7f9f010f0902926355d0904949b5cf9ad8",
+    "assets/catch-09-DUTC9O2i.wav": "7788ba987b69c94f3ba24061d2730cdce5b129ac14a029978adce4b42499a702",
+    "assets/music-theme-DEFR5fGd.wav": "3f75a6fd430977ca8c2f90f0ae2e094fe78a509c6c431d1909b64327d3f19f57",
+    "assets/catch-01-B8dNW9eY.wav": "e02165d1b2f3cb24720289316840a045b86cc1d89f9679ae3415415197696e5a",
+    "assets/miss-CnlqvdBg.wav": "02f383b56508f242fad1b5e81945871aa97d15d3e62c427d8674113c74d3aa8b",
+    "assets/ui-click-CkZgtdnv.wav": "35eca3cd62df887697ccbec7194376e2b5a2faa1ee146dacee640cbb488cb6af",
+    "assets/feedback-C0x0vrTJ.png": "54a530966c4e1d307baa1b784decfe40022fac51221fec1a8be14a7ac8140d35",
+    "assets/zcool-kuaile-game-DnjX8NZd.woff2": "29bbd5b1422242d14660b6a7e3835414adfd53a75dbabb2088d2ae29dba2e542",
+    "assets/catch-06-BzCx4lZX.wav": "7688a41c176948d0c5c02968d56dec385e6cff87583ef14d78537a51aa359246",
+    "assets/catch-08-K4KmgQix.wav": "bc625261041dd9ea617c1faf35bfa43eb16adbcfb54d3f6e00437d55eeb83635",
+    "assets/failure-rwyfGNgT.wav": "35cc765ea53f8f80840610d09fa35b80cafb2b07346c61890143931941107ad1",
+    "assets/baskets.atlas-BOLmFQqb.json": "8ec94123189c3026df012afb84c040b9fe1d3ac33c5ff89e84175989b539c4cd",
+    "assets/catch-02-5y5TFcKz.wav": "237b8a79788dddb72895f5ebcb999c8a5a714c19648cfa863a722867f0be77f8",
+    "assets/victory-ByMtsyUr.wav": "5c31c305708ba4dd18bb39604b0ddd0c3e325c87770863fde1ac79310417d102",
+    "assets/catch-05-CVcNSzHs.wav": "c20161dee2cfb6afc99a99a325710fb472a455d6e6a08abec61205f42dc251d6",
+    "assets/ui-toggle-Q57yqO3e.wav": "0fe1ed7d0a65eb1aaa2e42678e0c458057be4ba8c88b7d1deeefa8dbc2992be3",
+    "assets/ui-skins-DfdNA7Ho.png": "76e50668bacdd85a7986d74bd4651582422ccb5e59398cfeefa78695aa366941",
+    "assets/catch-04-CR_5HDjF.wav": "9c32ef16160efa0c124be3c914dc5aea73f84767f001c8aa7ba04b04bb47d66a",
+    "assets/orchard-backdrop-BCkXt388.png": "f29c0f60b9894243de10e3387b4d67bb2ae10d381d52be0c6ca7842bc645f2b0",
+    "assets/catch-03-Bzf1kjW5.wav": "533e4ab438b2ebc3d4bb25685a3e0ca04364c6d97a4b41fbbdf6a983140437ff",
+    "assets/apples.atlas-AiRL-7dt.json": "91cc03f3b6115ee704ee36b23e31f4d03103d146690b65b66cc93ac4fbf8815e",
+    "assets/noto-sans-sc-game-C4or3IqV.woff2": "a0f88a76a0ef907f245152d77c2a80fda6705159d6b990f1332484e1ae93ea77",
+    "assets/baskets-1ca5g3mR.png": "b32ba68af8b5bffc979a4e2f0437216dd42a6c7831428ba74c307e754bfa33ef",
+    "assets/index-Bj8ysIWm.js": "507c880197f7c70346fcfbd1a0baf6c659aae659a9ddd2954bcb4271f09f76b8",
+    "assets/catch-10-CSEiPKsN.wav": "f64a2f8eb05ffadaf7b1f1e1a9d37640b6c9b0b59b9e07a7af83ad522f9036da"
+  },
+  "observations": [
+    {
+      "name": "title",
+      "at": 924.7999997138977,
+      "title": true,
+      "paused": false,
+      "result": false,
+      "headings": [
+        "苹果接接乐"
+      ],
+      "live": "",
+      "focus": "开始游戏",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        },
+        {
+          "text": "开始游戏",
+          "label": null,
+          "x": 480,
+          "y": 356,
+          "width": 320,
+          "height": 104
+        }
+      ]
+    },
+    {
+      "name": "play",
+      "at": 1773,
+      "title": false,
+      "paused": false,
+      "result": false,
+      "headings": [],
+      "live": "已接住 0 个，漏接 0 个",
+      "focus": "\n    \n    声音接住0/ 10漏接0/ 3已接住 0 个，漏接 0 个\n  \n\n",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        }
+      ]
+    },
+    {
+      "name": "playing-after-target-switch",
+      "at": 2927,
+      "title": false,
+      "paused": false,
+      "result": false,
+      "headings": [],
+      "live": "已接住 0 个，漏接 0 个",
+      "focus": "\n    \n    声音接住0/ 10漏接0/ 3已接住 0 个，漏接 0 个\n  \n\n",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        }
+      ]
+    },
+    {
+      "name": "result",
+      "at": 7791.099999904633,
+      "title": false,
+      "paused": false,
+      "result": true,
+      "headings": [
+        "差一点！"
+      ],
+      "live": "已接住 0 个，漏接 3 个",
+      "focus": "再玩一次",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        },
+        {
+          "text": "再玩一次",
+          "label": null,
+          "x": 500,
+          "y": 377,
+          "width": 280,
+          "height": 88
+        },
+        {
+          "text": "回到标题",
+          "label": null,
+          "x": 590,
+          "y": 476,
+          "width": 100,
+          "height": 35
+        }
+      ]
+    },
+    {
+      "name": "retried",
+      "at": 8109.900000095367,
+      "title": false,
+      "paused": false,
+      "result": false,
+      "headings": [],
+      "live": "已接住 0 个，漏接 0 个",
+      "focus": "\n    \n    声音接住0/ 10漏接0/ 3已接住 0 个，漏接 0 个\n  \n\n",
+      "animations": [],
+      "buttons": [
+        {
+          "text": "声音",
+          "label": "关闭声音",
+          "x": 1194,
+          "y": 18,
+          "width": 64,
+          "height": 66
+        }
+      ]
+    }
+  ],
+  "trace": [
+    {
+      "at": 1793440976958,
+      "click": ".btn-start"
+    },
+    {
+      "at": 1793440978040,
+      "browserAction": "activate another owned headless target",
+      "focusBefore": {
+        "visibility": "visible",
+        "focus": true
+      },
+      "whileOtherActive": {
+        "visibility": "visible",
+        "focus": true,
+        "paused": false
+      }
+    },
+    {
+      "unverified": "No pause reached through target activation; no synthetic blur or direct controller call substituted"
+    },
+    {
+      "at": 1793440979049,
+      "key": "ArrowLeft",
+      "holdMs": 850
+    },
+    {
+      "at": 1793440983840,
+      "click": ".btn-retry"
+    }
+  ],
+  "sequence": [
+    {
+      "file": "motion-000.png",
+      "atMs": 0
+    },
+    {
+      "file": "motion-001.png",
+      "atMs": 17.460107803344727
+    },
+    {
+      "file": "motion-002.png",
+      "atMs": 36.08894348144531
+    },
+    {
+      "file": "motion-003.png",
+      "atMs": 83.73594284057617
+    },
+    {
+      "file": "motion-004.png",
+      "atMs": 101.18794441223145
+    },
+    {
+      "file": "motion-005.png",
+      "atMs": 120.1791763305664
+    },
+    {
+      "file": "motion-006.png",
+      "atMs": 166.30816459655762
+    },
+    {
+      "file": "motion-007.png",
+      "atMs": 184.90004539489746
+    },
+    {
+      "file": "motion-008.png",
+      "atMs": 217.2839641571045
+    },
+    {
+      "file": "motion-009.png",
+      "atMs": 250.56910514831543
+    },
+    {
+      "file": "motion-010.png",
+      "atMs": 268.157958984375
+    },
+    {
+      "file": "motion-011.png",
+      "atMs": 285.4740619659424
+    },
+    {
+      "file": "motion-012.png",
+      "atMs": 316.3280487060547
+    },
+    {
+      "file": "motion-013.png",
+      "atMs": 350.4970073699951
+    },
+    {
+      "file": "motion-014.png",
+      "atMs": 367.95496940612793
+    },
+    {
+      "file": "motion-015.png",
+      "atMs": 400.35414695739746
+    },
+    {
+      "file": "motion-016.png",
+      "atMs": 417.6609516143799
+    },
+    {
+      "file": "motion-017.png",
+      "atMs": 449.4669437408447
+    },
+    {
+      "file": "motion-018.png",
+      "atMs": 467.0579433441162
+    },
+    {
+      "file": "motion-019.png",
+      "atMs": 500.72598457336426
+    },
+    {
+      "file": "motion-020.png",
+      "atMs": 517.9760456085205
+    },
+    {
+      "file": "motion-021.png",
+      "atMs": 549.7219562530518
+    },
+    {
+      "file": "motion-022.png",
+      "atMs": 567.6491260528564
+    },
+    {
+      "file": "motion-023.png",
+      "atMs": 599.6830463409424
+    },
+    {
+      "file": "motion-024.png",
+      "atMs": 633.6929798126221
+    },
+    {
+      "file": "motion-025.png",
+      "atMs": 652.3821353912354
+    },
+    {
+      "file": "motion-026.png",
+      "atMs": 666.6810512542725
+    },
+    {
+      "file": "motion-027.png",
+      "atMs": 716.7210578918457
+    },
+    {
+      "file": "motion-028.png",
+      "atMs": 734.626054763794
+    },
+    {
+      "file": "motion-029.png",
+      "atMs": 752.3460388183594
+    },
+    {
+      "file": "motion-030.png",
+      "atMs": 800.5640506744385
+    },
+    {
+      "file": "motion-031.png",
+      "atMs": 818.295955657959
+    },
+    {
+      "file": "motion-032.png",
+      "atMs": 836.0531330108643
+    },
+    {
+      "file": "motion-033.png",
+      "atMs": 1086.0309600830078
+    },
+    {
+      "file": "motion-034.png",
+      "atMs": 1086.503028869629
+    },
+    {
+      "file": "motion-035.png",
+      "atMs": 1085.395097732544
+    }
+  ],
+  "errors": [],
+  "recording": {
+    "id": "62f7cc54-d190-4fc7-ae2f-3ad10fe06778",
+    "label": "apple-existing-build-readonly",
+    "conditions": {
+      "source": "agent-declared",
+      "text": "Unmodified existing dist; 1280x720 headless; ordinary inputs; no state injection or new build"
+    },
+    "preview": {
+      "mode": "existing-build",
+      "project": "apple-catch-audited"
+    },
+    "observedEnvironment": {
+      "status": "observed",
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "devicePixelRatio": 1,
+      "maxTouchPoints": 0,
+      "coarsePointer": false,
+      "hover": true
+    },
+    "targetId": "D55751E510B46041CEC15410F2638E1B",
+    "startedAt": "2026-10-31T10:02:55.730Z",
+    "endedAt": "2026-10-31T10:03:04.495Z",
+    "durationMs": 8764,
+    "status": "finished",
+    "endReason": "inspection-finished",
+    "observationStatus": "finished",
+    "gameplayVerdict": "not-evaluated",
+    "droppedEvents": 0,
+    "truncatedEvents": 0,
+    "counts": {
+      "observer.started": 1,
+      "navigation": 1,
+      "console.log": 1
+    },
+    "events": [
+      {
+        "at": "2026-10-31T10:02:55.732Z",
+        "type": "observer.started",
+        "targetId": "D55751E510B46041CEC15410F2638E1B",
+        "detail": {
+          "url": "about:",
+          "earlierConsoleHistoryExcluded": true
+        }
+      },
+      {
+        "at": "2026-10-31T10:02:55.734Z",
+        "type": "navigation",
+        "targetId": "D55751E510B46041CEC15410F2638E1B",
+        "detail": {
+          "url": "http://127.0.0.1:58517/"
+        }
+      },
+      {
+        "at": "2026-10-31T10:02:55.943Z",
+        "type": "console.log",
+        "targetId": "D55751E510B46041CEC15410F2638E1B",
+        "detail": [
+          "%c %c %c %c %c Phaser v3.90.0 (WebGL | Web Audio) %c https://phaser.io/v390",
+          "background: #ff0000",
+          "background: #ffff00",
+          "background: #00ff00",
+          "background: #00ffff",
+          "color: #ffffff; background: #000000",
+          "background: transparent"
+        ]
+      }
+    ],
+    "files": {
+      "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/backups/ui-motion-research-20261031/apple-readonly-2026-10-31T10-02-55.552Z/62f7cc54-d190-4fc7-ae2f-3ad10fe06778.json",
+      "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/backups/ui-motion-research-20261031/apple-readonly-2026-10-31T10-02-55.552Z/62f7cc54-d190-4fc7-ae2f-3ad10fe06778.png"
+    },
+    "screenshotAvailable": true
+  },
+  "unverified": [
+    "Representative enjoyment/comprehension",
+    "Audio and audiovisual synchronization",
+    "New-Skill adoption or production improvement",
+    "Other sizes/devices/engines and victory variant",
+    "Actual focus-loss pause if headless target activation does not trigger it"
+  ]
+}

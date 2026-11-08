@@ -1,3 +1,6 @@
+import type { ProductionAssignment } from './production-workflow'
+import { produceResources } from '../resource-production'
+import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { createHash } from 'node:crypto'
 import { BeeGamePreviewManager } from '../preview-manager'
 import { resolve } from 'node:path'
@@ -78,13 +81,13 @@ test('resource context preserves source preferences and authorization without a 
     expect(prompt).toContain('required licenses')
     expect(prompt).not.toContain('Default sourcing order')
     expect(prompt).toContain('resource-library preferences')
-    expect(prompt).toContain('Resource-library usage optional permits other artwork sources')
-    expect(prompt).toContain('absence of user-named asset files')
-    expect(prompt).toContain('actual source findings and current tool capabilities')
-    expect(prompt).toContain('not untested assumptions that generation is risky or slow')
+    expect(prompt).not.toContain('Resource-library usage optional permits other artwork sources')
+    expect(prompt).not.toContain('absence of user-named asset files')
+    expect(prompt).not.toContain('actual source findings and current tool capabilities')
+    expect(prompt).not.toContain('not untested assumptions that generation is risky or slow')
     expect(prompt).not.toContain('Resource-library usage governs library sourcing')
     expect(prompt).not.toMatch(/gpt-image|image2\.5|must generate/i)
-    expect(prompt).toContain('Failed sourcing does not authorize changing those requirements')
+    expect(prompt).not.toContain('Failed sourcing does not authorize changing those requirements')
     expect(prompt).toContain('usage rights')
     expect(prompt).not.toContain('For paid generation')
     expect(prompt).not.toContain('quote and submission contract')
@@ -99,7 +102,7 @@ test('resource context preserves source preferences and authorization without a 
 
 test('task-specific countdown procedure stays in tool help instead of the universal production context', () => {
   expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).not.toContain('--countdown-blur-sample')
-  expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).toContain('a screenshot does not verify motion or interaction')
+  expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).not.toContain('a screenshot does not verify motion or interaction')
   expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).not.toContain('## Required design dependencies')
 })
 
@@ -133,7 +136,7 @@ test('ended native goal exposes independent host evidence, never author acceptan
 test('image bridge binds real goal owner/project and never opens for duplicate intake',async()=>{
   const calls:any[]=[];let closes=0
   const f=await fixture('normal',false,undefined,value=>{
-    calls.push(value);return {endpoint:'http://127.0.0.1:1/synthetic-image',instruction:'not a generation',
+    calls.push(value);return {fetch: (request:Request) => fetch(new Request('http://127.0.0.1:1/synthetic-image', request)),instruction:'not a generation',
       close:async()=>{closes++}}
   },0,{},undefined,false,async root=>{
     const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(root,f.body.chatSessionId),'utf8'))
@@ -186,7 +189,7 @@ test('ordinary Chat preserves discussion text and rejects the retired discuss mo
 
 async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false,resourceLibraryBaseUrl?:string,
   openAgentImage?:(value:any)=>AgentImageAccess, extraEvents=0,
-  faults:{startupFailure?:boolean;afterSettlement?:()=>Promise<void>;claimResponses?:number;exitWrites?:boolean;exitFailures?:number;missingEntrySkill?:boolean;nativeGoalStatus?:'active'|'complete'|'blocked'|'budgetLimited';nativeGoalBudget?:number|null;pauseTokens?:number;pauseUnavailable?:boolean;noAssistant?:boolean}={},libraryAuthToken?:string,blankProject=false, onSubmit?:(root:string,input:BeeGameSessionSubmitInput,context:string)=>Promise<void>, developmentPreview?:()=>BeeGamePreviewManager) {
+  faults:{startupFailure?:boolean;afterSettlement?:()=>Promise<void>;claimResponses?:number;exitWrites?:boolean;exitFailures?:number;missingEntrySkill?:boolean;nativeGoalStatus?:'active'|'complete'|'blocked'|'budgetLimited';nativeGoalBudget?:number|null;pauseTokens?:number;pauseUnavailable?:boolean;noAssistant?:boolean;omitVerificationResult?:boolean}={},libraryAuthToken?:string,blankProject=false, onSubmit?:(root:string,input:BeeGameSessionSubmitInput,context:string)=>Promise<void>, developmentPreview?:()=>BeeGamePreviewManager) {
   const container=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-goal-unit-')))
   const root=join(container,'project')
   await mkdir(root)
@@ -205,7 +208,7 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     }
   }}
   const starts:any[]=[]
-  const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);if(faults.startupFailure && !input.finalOutput)throw Error('Synthetic runner startup failed');const onNativeUsage=input.onNativeUsage;let currentInput:BeeGameSessionSubmitInput|undefined;let terminalStatus:string|undefined;return {
+  const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);if(faults.startupFailure && (!input.finalOutput || input.finalOutput.designReview && !input.finalOutput.readOnly))throw Error('Synthetic runner startup failed');const onNativeUsage=input.onNativeUsage;let currentInput:BeeGameSessionSubmitInput|undefined;let terminalStatus:string|undefined;return {
     async completeGoal(status:'complete'|'blocked'='complete') {
       terminalStatus=status
       await currentInput!.onMessage({type:'runtime_event',runtime:'bgs',eventType:'system.status',subtype:'native_goal',threadId:nativeId,
@@ -221,6 +224,12 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
       if (prompt.startsWith('/bgs-builtins:') && !faults.missingEntrySkill) await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'system.status', text: 'Loaded entry skill', skill: {name:prompt.slice(1,prompt.indexOf(' ')),messageId:'entry-body',source:'command',status:'loaded'} })
       await writeFile(join(root,'candidate.txt'),'Synthetic partial candidate')
       await onSubmit?.(root,input,String(starts.at(-1).systemContext))
+      if(input.finalOutput?.schema.properties &&
+          (input.finalOutput.schema.properties as any).observations?.type==='array' && !input.signal.aborted && mode==='normal' && !faults.omitVerificationResult) {
+        const current=await local.read('goal-project','owner')
+        if(!current!.agentTurns!.at(-1)!.implementationVerification)
+          await input.finalOutput.accept({summary:'Synthetic required checks observed through current input',observations:[{outcome:'Required player action',status:'passed',evidence:'Delivered input produced the required outcome'}]})
+      }
       for(let i=0;i<extraEvents;i++)await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic audit event ' + i, assistantBlockId: 'synthetic-' + i })
       if(mode==='wait') await new Promise<void>(resolve=>{
         if(input.signal.aborted)resolve();else input.signal.addEventListener('abort',()=>resolve(),{once:true})
@@ -294,70 +303,108 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     close:async()=>{await Promise.all(cleanup.map(fn=>fn()));await sessions.dispose();await rm(container,{recursive:true,force:true})}}
 }
 
-for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web ${creationMode} intake reviews its GDD then enters implementation without fixed template content`,async()=>{
-  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input,context)=>{
-    if(!input.finalOutput?.designReview)return
-    expect(input.prompt).toContain('Choose the content, structure and depth')
-    await input.finalOutput.writeDocument!.authorize()
-    await mkdir(join(root,'docs'),{recursive:true})
-    await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Current decisions\nOne playable loop.\n')
-    await expect(input.finalOutput.accept({status:'ready',summary:'Unreviewed draft'})).rejects.toThrow('no completed independent review')
-    await recordSyntheticDesignReview(input)
-    await input.finalOutput.accept({status:'ready',summary:'Reviewed current decisions'})
+for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' project carries only its adopted direction through reviewed design, resources, implementation and verification',async()=>{
+  const stages:string[]=[]
+  let providerSubmissions=0, waiting=false
+  const requests:string[]=[]
+  const f=await fixture('normal',false,undefined,()=>({
+    instruction:'Simulated image service',close:async()=>{},fetch:async(request:Request)=>{
+      if(request.method==='GET')return Response.json({available:true})
+      const {requestId}=await request.json()
+      if(!requests.includes(requestId))providerSubmissions++
+      requests.push(requestId)
+      // The provider completed this image but the first delivery failed.
+      return requests.length===1 ? Response.json({error:'delivery interrupted'},{status:503}) :
+        new Response(new Uint8Array([137,80,78,71]),{headers:{'Content-Type':'image/png'}})
+    }
+  }),0,{},undefined,true,async(root,input,systemContext)=>{
+    const {assignment}=await input.workflow!({action:'status'}) as {assignment:ProductionAssignment}
+    const stage=assignment.stage
+    stages.push(stage)
+    const prompt=systemContext+"\n"+JSON.stringify(input.prompt)
+    const chosen='assets/reference/selected/opening.html'
+    const alternate='assets/reference/alternative.html'
+    const write=async(path:string,content:string)=>{
+      await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),content)
+    }
+    if(stage==='discovery') {
+      await write('docs/ResearchBrief.md','Observed input sequence from the supplied study.')
+      const findings={status:'ready',summary:'Sources retained',sections:[],files:['docs/ResearchBrief.md']}
+      await expect(input.finalOutput!.accept(findings)).rejects.toThrow('traceable')
+      await write('docs/research/study.svg','<svg/>')
+      await write('docs/ResearchBrief.md','Observed input sequence from docs/research/study.svg. Inference: use motion to reveal input.')
+      await input.finalOutput!.accept({...findings,files:[...findings.files,'docs/research/study.svg']})
+    } else if(stage==='direction') {
+      if(!input.nativeRecovery)expect(prompt).toContain('Observed input sequence')
+      if(creationMode==='creative') {
+        const doc=input.nativeRecovery?'recovered-request.json':'initial-request.json'
+        await write(doc,JSON.stringify({purpose:'reference',prompt:'Chosen direction study'}))
+        const child=Bun.spawn([process.execPath,input.imageGenerationEntry!,'generate',doc,'assets/reference/study.png'],{
+          cwd:root,env:{...process.env,BEEGAME_ASSET_CAPABILITY_FILE:projectPreviewCapabilityPath(root,f.body.chatSessionId)},stderr:'pipe',stdout:'pipe'})
+        const diagnosis=await new Response(child.stderr).text()
+        expect(await child.exited,diagnosis).toBe(input.nativeRecovery?0:1)
+        if(!input.nativeRecovery) {
+          waiting=true
+          await new Promise<void>(done=>input.signal.addEventListener('abort',()=>done(),{once:true}))
+          return
+        }
+        expect(requests).toHaveLength(2)
+        expect(requests[0]).toBe(requests[1])
+        expect(providerSubmissions).toBe(1)
+      }
+      await write(chosen,'<canvas></canvas>');await write(alternate,'<button/>')
+      await write('docs/VisualContract.md','Selected motion begins with a visible response.')
+      const result={status:'ready',summary:'Selected motion',sections:[],files:['docs/VisualContract.md',chosen]}
+      await expect(input.finalOutput!.accept({...result,files:[...result.files,alternate]})).rejects.toThrow('only the adopted direction')
+      await input.finalOutput!.accept(result)
+      if(creationMode==='blueprint') {
+        waiting=true
+        await new Promise<void>(done=>input.signal.addEventListener('abort',()=>done(),{once:true}))
+      }
+    } else {
+      expect(prompt).toContain('Selected motion begins')
+      expect(prompt).toContain(chosen)
+      expect(prompt).not.toContain(alternate)
+      expect(prompt).not.toContain('docs/research/study.svg')
+      if(stage==='design') {
+        await input.finalOutput!.writeDocument!.authorize()
+        await write('docs/GDD.md','# Rules\n## Play\nRespond to input.')
+        await recordSyntheticDesignReview(input)
+        await input.finalOutput!.accept({status:'ready',summary:'Reviewed design'})
+      } else if(stage==='resources') {
+        const example=assetManifestAuthoringExamples().canonical,item=example.resources[0]!
+        await write(item.root_path,'{}')
+        const handoff={status:'ready',summary:'Produced piece',sections:['Play'],files:item.file_paths}
+        await expect(input.finalOutput!.accept(handoff)).rejects.toThrow('registered runtime files')
+        await produceResources(root,{operation:'register',projectTarget:{...example.project_target!,resource_library_usage:'optional'},requirements:example.requirements,
+          resources:[{id:item.id,fulfills:item.fulfills,root_path:item.root_path,file_paths:item.file_paths,provisional:false,reason:'Runtime art',selection_reason:['Matches selected direction']}]},undefined,'optional')
+        await input.finalOutput!.accept(handoff)
+      } else if(stage==='implementation') {
+        await write('index.html','<canvas></canvas>')
+        await input.workflow!({action:'advance',summary:'Runtime ready',sections:[],files:['index.html']})
+      } else {
+        expect(prompt).toContain('index.html')
+        await input.finalOutput!.accept({summary:'Observed response',observations:[{outcome:'Respond to input',status:'passed',evidence:'Visible response'}],externalBlocker:null})
+      }
+    }
   })
-  Object.assign(f.body.brief,{creation_mode:creationMode,build_source:null,
-    settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
+  Object.assign(f.body.brief,{creation_mode:creationMode,build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    let run=await f.wait(r=>r.agentTurns?.length===2 && Boolean(r.agentTurns[1]?.finishedAt) && !r.writer)
-    expect(run.creation).toEqual({initialDelivery:'complete-game',editableContent:false})
-    const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
-    expect(initialMessage, run.blockedReason).toBeDefined()
-    expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
-    expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
-    await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
-    expect(String(f.submissions[0]!.prompt)).not.toContain(JSON.stringify(f.body.brief))
-    expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(String(f.submissions[0]!.prompt)).not.toMatch(/\$game-[A-Za-z0-9_-]+/)
-    expect(f.submissions[0]!.prompt).toContain('BGS current production stage: design')
-    expect(f.submissions[0]!.prompt).not.toContain(f.body.brief.idea)
-    expect(f.submissions[0]!.nativeGoal).toBeUndefined()
-    expect(run.productionWorkflow).toBe(1)
-    expect(f.starts[0].systemContext).toContain('Preserve the user-selected engine and platform')
-    expect(f.starts[1].systemContext).toContain('BGS Scene/UI editor JSON and content/index.json are not production deliverables on any platform')
-    expect(f.submissions[0]!.finalOutput?.designReview).toBeDefined()
-    expect(run.agentTurns!.map(turn=>turn.production?.stage)).toEqual(['design','implementation'])
-    expect(run.agentTurns![0]!.designReviews).toHaveLength(1)
-    expect(run.agentTurns![0]!.productionHandoff?.next?.stage).toBe('implementation')
-    expect(f.submissions[1]!.finalOutput).toBeUndefined()
-    expect(run.agentTurns![1]!.browserVerification).toBeUndefined()
-    expect(String(f.submissions[1]!.prompt)).not.toContain('a separate GDD document and review are not prerequisites')
-    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toContain('One playable loop.')
-    expect(f.submissions.every(input=>!input.nativeGoal)).toBe(true)
-    const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
-    expect(guide).not.toContain('Built-in Skill index')
-    expect(guide).not.toContain('Collection navigator:')
-    expect(guide).toContain('Select and read applicable Skills')
-    expect(f.starts[0].systemContext).not.toContain(guide.slice(guide.indexOf('## Professional methods')))
-    expect(run.status).toBe('completed')
-    expect(run.blockedReason).toBeUndefined()
-    expect(f.submissions).toHaveLength(2)
-    // Identical intake is read-only even after the model has authored new files.
-    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    expect(f.submissions).toHaveLength(2)
-    expect(await readFile(join(f.root,'AGENTS.md'),'utf8')).toBe(guide)
-    await mkdir(join(f.root,'src'),{recursive:true})
-    await writeFile(join(f.root,'src/game.js'),'// retained user work')
-    expect((await f.call('/agent/messages','POST',{requestKey:'feedback',runId:run.id,
-      chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
-      intent:'work',text:'After playtesting, continue only the requested slice correction.'})).status).toBe(202)
-    run=await f.wait(r=>Boolean(r.agentTurns?.[2]?.finishedAt))
-    expect(f.submissions).toHaveLength(3)
-    expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
-    expect(run.creation?.initialDelivery).toBe('complete-game')
-    const refreshed=await readFile(join(f.root,'AGENTS.md'),'utf8')
-    expect(refreshed).toBe(guide)
-    expect(refreshed.slice(refreshed.indexOf('## Professional methods'))).toBe(guide.slice(guide.indexOf('## Professional methods')))
+    {
+      await f.wait(r=>waiting||Boolean(r.agentTurns?.at(-1)?.error))
+      expect(waiting,(await f.store.read('goal-project','owner'))?.blockedReason).toBe(true)
+      await f.call('/stop','POST')
+      let stopped=await f.wait(r=>Boolean(r.paused) && !r.writer)
+      await f.call('/resume','POST',{planRevision:stopped.planRevision})
+      stopped=(await f.store.read('goal-project','owner'))!
+      const result=creationMode==='blueprint' ? await f.call('/agent/continue-production','POST',{expectedVersion:stopped.version,afterAttemptId:stopped.agentTurns!.at(-1)!.attemptId}) : await f.call('/agent/messages','POST',{requestKey:'resume-direction',runId:stopped.id,chatSessionId:stopped.chatSessionId,expectedVersion:stopped.version,requirementsRevision:stopped.requirements.revision,intent:'continue',continuationOf:stopped.agentTurns!.at(-1)!.attemptId,text:''})
+      expect(result.status,JSON.stringify([await result.clone().text(),stopped.agentTurns!.at(-1)?.error])).toBe(202)
+    }
+    const run=await f.wait(r=>r.status==='completed'||Boolean(r.agentTurns?.at(-1)?.error))
+    expect(stages,run.blockedReason).toEqual(['discovery','direction',...(creationMode==='creative'?['direction']:[]),'design','resources','implementation','verification'])
+    expect(run.agentTurns!.find(t=>t.production?.stage==='design')!.designReviews).toHaveLength(1)
+    expect(run.status,run.blockedReason).toBe('completed')
   }finally{await f.close()}
 },30000)
 
@@ -370,6 +417,15 @@ async function seedGddOnlyRun(f:Awaited<ReturnType<typeof fixture>>, historicalF
   run.productionWorkflow=1
   if(historicalFullGame)run.creation={initialDelivery:'design-led-first-version',editableContent:false}
   await f.store.commit(run.projectId,run.ownerId,0,run,'synthetic-gdd-only-project')
+}
+
+async function seedLegacyIsolatedRun(f: Awaited<ReturnType<typeof fixture>>, isolated = true) {
+  const run=createRun({projectId:'goal-project',ownerId:'owner',workspacePath:f.root,
+    chatSessionId:f.body.chatSessionId,requestKey:f.body.requestKey,text:JSON.stringify(f.body.brief),
+    constraints:f.body.brief.settings,ids:['goal']})
+  run.creation={initialDelivery:'complete-game',editableContent:false,...(isolated ? {verification:'isolated' as const} : {})}
+  run.productionWorkflow=1
+  await f.store.commit(run.projectId,run.ownerId,0,run,'synthetic-retained-isolated-policy')
 }
 
 async function seedLegacyVisualRun(f: Awaited<ReturnType<typeof fixture>>, draft: string) {
@@ -524,7 +580,7 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(JSON.stringify(submit.prompt)).not.toContain('first assignment ends at visual-direction handoff')
     expect(JSON.stringify(submit.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[0].systemContext).toContain(agentProfessionalContextForRun(run))
-    expect(f.starts[0].systemContext).toContain('actual source findings and current tool capabilities')
+    expect(f.starts[0].systemContext).not.toContain('actual source findings and current tool capabilities')
     expect(f.starts[0].systemContext).toContain('No root project guide exists')
     expect(f.starts[0].systemContext).toContain('Current BGS tools directory')
     expect(f.starts[0].systemContext).not.toContain('BgsMeasurement')
@@ -534,7 +590,7 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(f.starts[0].systemContext).not.toContain('Maintain root AGENTS.md')
     expect(f.starts[0].systemContext).not.toContain('project-navigation-sources')
     expect(JSON.stringify(submit.prompt)).not.toContain('BGS current assignment')
-    expect(f.starts[0].systemContext.split('Read contracts as needed:')).toHaveLength(2)
+    expect(f.starts[0].systemContext.split('Acquisition: bun assets.mjs --help.')).toHaveLength(2)
     expect(f.starts[0].systemContext).not.toContain('Optional BGS project tools')
     expect(JSON.stringify(submit.prompt)).not.toContain('Optional BGS project tools')
     expect(String(submit.prompt)).not.toContain(JSON.stringify(f.body.brief))
@@ -626,7 +682,7 @@ test('same-project work/change reuse native history; one CAS changes revision, d
     expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('only affected domains')
     expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[2].systemContext).toContain(agentProfessionalContextForRun(run,true))
-    expect(f.starts[2].systemContext).toContain('absence of user-named asset files')
+    expect(f.starts[2].systemContext).not.toContain('absence of user-named asset files')
     expect(f.starts[2].systemContext).not.toContain('New design-led first-version deliverables')
     expect(f.starts[2].systemContext).toContain('No root project guide exists')
     expect(f.starts[2].systemContext).not.toContain('## Required design dependencies')
@@ -942,17 +998,20 @@ test('focused facts retain legacy discuss records and answered Questions, never 
   expect(facts.answeredQuestions[1]).not.toHaveProperty('answers')
 })
 
-test('shared guide supplies design methods once without a compatibility fallback',()=>{
+test('shared guide keeps ownership once without host method routing',()=>{
   const run={creation:{initialDelivery:'design-led-first-version',editableContent:true}} as Run
   for(const followup of [false,true]) {
     const savedGuide=PROJECT_WORKING_CONVENTIONS+'\nPROJECT_SPECIFIC_ROUTE'
     const professional=agentProfessionalContextForRun(run,followup)
-    expect(professional).not.toContain('## Professional methods')
+    expect(professional).not.toContain('## Implementation decisions')
     expect(professional).not.toContain('## Required design dependencies')
+    expect(professional).not.toContain('game-content-pipeline-engineer')
+    expect(professional).not.toContain('Phaser for 2D')
+    expect(professional).not.toContain('BGS limited parallel work')
     const context=professional+'\n'+savedGuide
-    expect(context.split('## Professional methods')).toHaveLength(2)
+    expect(context.split('Production methods and implementation choices belong to the current authorized work')).toHaveLength(2)
     expect(context.split('## Source ownership')).toHaveLength(2)
-    for(const value of ['Select and read applicable Skills','docs/GDD.md','PROJECT_SPECIFIC_ROUTE',
+    for(const value of ['Production methods and implementation choices belong to the current authorized work','docs/GDD.md','PROJECT_SPECIFIC_ROUTE',
       'Preserve confirmed requirements, design standards, budget, authorization','required licenses'])expect(context).toContain(value)
   }
 })
@@ -964,7 +1023,7 @@ test.each([undefined,'# Custom navigation\nRun the saved command'])('goal dispat
     await f.call('/agent/goal','POST',f.body)
     await f.wait(run=>Boolean(run.agentTurns?.[0]?.finishedAt))
     const context=f.starts[0].systemContext
-    expect(context).not.toContain('## Professional methods')
+    expect(context).not.toContain('## Implementation decisions')
     expect(context).not.toContain('## Required design dependencies')
     expect(context).toContain('Current BGS tools directory')
     expect(context).toContain('Preserve the user-selected engine and platform')
@@ -1005,7 +1064,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
   for(const prompt of [false,true].map(followup=>PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run,followup))) {
-    expect(prompt).toContain('Select and read applicable Skills')
+    expect(prompt).toContain('Production methods and implementation choices belong to the current authorized work')
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('BGS Scene/UI editor JSON and content/index.json are not production deliverables on any platform')
     expect(prompt).not.toContain('Prose, palettes and JSON geometry do not replace visual design')
@@ -1251,7 +1310,7 @@ for (const action of ['stop','resume'] as const) test(action+' settles proven le
 test('failed image cleanup cannot claim an unconfirmed writer exit',async()=>{
   let closes=0
   const f=await fixture('normal',false,undefined,()=>({
-    endpoint:'http://127.0.0.1:1/synthetic',instruction:'not a generation',
+    fetch: (request:Request) => fetch(new Request('http://127.0.0.1:1/synthetic', request)),instruction:'not a generation',
     close:async()=>{closes++;throw Error('Synthetic in-flight image outcome unconfirmed')},
   }),0,{},undefined,false,async root=>{
     const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(root,f.body.chatSessionId),'utf8'))
@@ -1386,6 +1445,8 @@ test('unsubmitted design changes are carried once without duplicating system con
     expect(context).not.toContain('Confirmed user data not previously submitted to native:')
     expect(input.finalOutput!.answer).toBeDefined()
     expect(await input.finalOutput!.answer!({status:'answered',summary:'Retained pending design request.'})).toBe('Retained pending design request.')
+    expect(await input.finalOutput!.answer!({status:'answered',summary:'Retained pending design request.',sections:[],files:[],reviewResponses:[]})).toBe('Retained pending design request.')
+    expect(await input.finalOutput!.answer!({status:'answered',summary:'Must not submit a source.',files:['docs/GDD.md']})).toBeUndefined()
   })
   Object.assign(f.body.brief,{creation_mode:'blueprint',build_source:null})
   await seedGddOnlyRun(f,true)
@@ -1513,16 +1574,16 @@ test('first and resumed goals retain professional coverage and design dependenci
     expect(prompt).not.toContain('Use actual asset metrics and existing checks when binding resources')
     expect(prompt).toContain('The current user assignment determines deliverables and stopping point')
     expect(prompt).toContain('Preserve confirmed requirements')
-    expect(prompt).toContain('Select and read applicable Skills')
+    expect(prompt).toContain('Production methods and implementation choices belong to the current authorized work')
     expect(prompt).not.toContain('Verification records')
-    expect(prompt).toContain('Reuse valid results for unchanged behavior and conditions')
+    expect(prompt).toContain('Reuse valid observations for unchanged conditions')
     expect(professional).not.toContain('Select applicable Skills for concrete problems')
     expect(professional).not.toContain('verify required behavior and presentation in the target runtime')
     for(const name of ['gameplay-programmer','game-technical-artist','game-feel-designer','root-cause-debugging'])
       expect(professional).not.toContain(name)
     expect(prompt).not.toContain('not certification')
     expect(prompt).not.toContain('game-quality acceptance')
-    expect(prompt).toContain('remaining defects, unverified behavior and external blockers')
+    expect(prompt).toContain('disclose known defects and unverified behavior')
   }
   expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
   expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')
@@ -1582,7 +1643,7 @@ test('ordinary questions retain answers and task identity without an unlock or e
 test('new and resumed goals retain requested scope while Agent selects Skills; follow-ups preserve literal intent', () => {
   const run={creation:{initialDelivery:'design-led-first-version'},requirements:{text:'BRIEF budget 20000000'}} as Run
   expect(agentGoalPrompt(run)).not.toStartWith('$')
-  expect(agentGoalPrompt(run)).toContain('Select relevant Skills, organize the work')
+  expect(agentGoalPrompt(run)).not.toContain('Select relevant Skills, organize the work')
   expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
   expect(agentGoalPrompt(run)).toContain('Respect the production dependencies for work in scope')
   expect(agentGoalPrompt(run)).toContain('do not infer additional deliverables from the project creation mode')
@@ -1592,13 +1653,15 @@ test('new and resumed goals retain requested scope while Agent selects Skills; f
     {...run,agentTurns:[{nativeSessionId:'existing-context'}]}]) {
     expect(agentGoalPrompt(other as Run)).not.toStartWith('/')
     expect(agentGoalPrompt(other as Run)).not.toContain('$game-creative-director-expert')
-    expect(agentGoalPrompt(other as Run)).toContain('Complete the currently authorized player behavior and adopted visual treatment')
+    expect(agentGoalPrompt(other as Run)).toContain('Complete the currently authorized player behavior, presentation and feedback')
     expect(agentGoalPrompt(other as Run)).toContain('Judge completion against those requirements and repair observed deviations')
-    expect(agentGoalPrompt(other as Run)).toContain('Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested.')
+    expect(agentGoalPrompt(other as Run)).not.toContain('Alternative cosmetic preferences')
     expect(agentProfessionalContextForRun(other as Run)).toContain(DESIGN_DECISION_SCOPE)
     expect(agentProfessionalContextForRun(other as Run,true).split(DESIGN_DECISION_SCOPE)).toHaveLength(2)
     expect(DESIGN_DECISION_SCOPE).toContain('Explicitly requested scope takes precedence')
-    expect(DESIGN_DECISION_SCOPE).toContain('author-added features and refinements do not become first-release obligations')
+    expect(DESIGN_DECISION_SCOPE).toContain('presentation and feedback for the agreed gameplay remain implementation work')
+    expect(DESIGN_DECISION_SCOPE).toContain('User-specified layouts and selected visual designs remain constraints')
+    expect(DESIGN_DECISION_SCOPE).toContain('initial layout proposal remains to be developed in concrete visual work, not confirmed by document completion or review')
     expect(agentGoalPrompt(other as Run)).toContain('Reuse valid observations and recheck affected behavior after changes')
   }
   for(const intent of ['message','work','continue','change'] as const)
@@ -1613,6 +1676,10 @@ test('Web/React uses native code on initial and resumed work regardless of histo
     const context=agentProfessionalContextForRun(run,followup)
     expect(context).toContain('use the confirmed engine/platform native scene, UI and resource sources')
     expect(context).toContain('Preserve existing runtime dependencies')
+    expect(context).toContain('Managed Vite Preview already rebases file-like root-relative static URLs')
+    expect(context).toContain('extensionless app/API routes are unchanged')
+    expect(context).toContain('localStorage/sessionStorage can throw in the opaque iframe')
+    expect(context).not.toContain('root-absolute asset/content URLs can escape')
     expect(context).toContain('use the confirmed engine/platform native scene, UI and resource sources')
     expect(context).not.toContain('BGS Editor reads')
     expect(context).not.toContain('This project requires BGS visual editing')
@@ -1839,7 +1906,7 @@ test(`one GDD author hands the reviewed document directly to implementation with
       throw new ProductionBlockedError('Synthetic visual boundary')
     }
     expect(input.nativeGoal).toBeUndefined()
-    expect(input.workflow).toBeUndefined();expect(input).not.toHaveProperty('measurement');expect(input).not.toHaveProperty('finishDelivery')
+    expect(input.workflow).toBeDefined();expect(input).not.toHaveProperty('measurement');expect(input).not.toHaveProperty('finishDelivery')
     expect(input.finalOutput.readOnly).toBe(true)
     const reviewContext=input.finalOutput.designReview!.context
     for (const clause of reviewContext.split('\n')) expect(context).toContain(clause)
@@ -1851,8 +1918,8 @@ test(`one GDD author hands the reviewed document directly to implementation with
     expect(reviewContext.split(DESIGN_DECISION_SCOPE)).toHaveLength(2)
     expect(context).not.toContain('Record governing gameplay quantities')
     expect(reviewContext).not.toContain('Record governing gameplay quantities')
-    expect(reviewContext).toContain('Current design handoff: the confirmed game and its next authorized production work.')
-    expect(reviewContext).toContain('docs/GDD.md records the decisions that work needs')
+    expect(reviewContext).toContain('Current design work develops the confirmed player experience.')
+    expect(reviewContext).toContain('Its design record and any selected visual sources feed implementation')
     expect(reviewContext).not.toContain('WriteProjectFile')
     expect(reviewContext).not.toContain('Skills')
     for(const value of [context,reviewContext])
@@ -1863,12 +1930,13 @@ test(`one GDD author hands the reviewed document directly to implementation with
     expect(context).not.toContain('Keep resources registered')
     expect(context).not.toContain('observe actual rendering')
     expect(input.prompt).toContain('BGS current production stage: design')
-    expect(input.prompt).toContain('if it already supplies those decisions, record that conclusion directly')
+    expect(input.prompt).toContain('from the confirmed brief and existing work')
+    expect(input.prompt).not.toContain('and actual pictures')
     expect(input.prompt).not.toContain(userText)
     expect(input.confirmedBriefContext).toContain(userText)
-    expect(input.prompt).toContain('Choose the content, structure and depth')
+    expect(input.prompt).toContain('Choose the design methods and the content, structure and depth')
     expect(context).not.toContain('Determine the product decisions still needed')
-    expect(context).toContain('playable MVP')
+    expect(context).toContain('small-scope game with a complete core experience')
     expect(reviewContext).not.toContain('Select artwork sources and representations')
     expect(String(input.prompt)).not.toContain('usable initial tuning')
     expect(String(input.prompt)).not.toContain('identified current feasibility question')
@@ -1876,6 +1944,9 @@ test(`one GDD author hands the reviewed document directly to implementation with
     expect(input.finalOutput.writeDocument.path).toBe('docs/GDD.md')
     await input.finalOutput.writeDocument.authorize()
     await mkdir(join(root,'docs'),{recursive:true})
+    await writeFile(join(root,'docs/treatment.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
+    if (!input.workflow) throw Error('Expected native selection capability')
+    await input.workflow({action:'select-visual',summary:'Adopted composition',sections:[],files:['docs/treatment.svg']})
     await writeFile(join(root,'docs/GDD.md'),source)
     await recordSyntheticDesignReview(input)
     await input.finalOutput.accept({status:'ready',summary:'Synthetic GDD saved'})
@@ -1903,16 +1974,23 @@ test(`one GDD author hands the reviewed document directly to implementation with
     const prompt=parts.filter(part=>part.type==='text').map(part=>part.text).join('\n')
     expect(prompt.split(JSON.stringify(source))).toHaveLength(2)
     expect(f.starts[1].systemContext).not.toContain(source.slice(0,80))
-    expect(prompt).toContain('Implement the confirmed scope and the design decisions needed to realize it')
+    expect(prompt).toContain('confirmed requirements, relevant GDD decisions and existing work')
+    expect(prompt).toContain('docs/treatment.svg')
+    expect(prompt).toContain('adjust your provisional layout, transfer of control and feedback')
+    expect(prompt).toContain('reuse relevant observations')
+    expect(run.agentTurns![0]!.productionHandoff!.sources.map(s=>s.path)).toEqual(['docs/GDD.md','docs/treatment.svg'])
+    expect(prompt).toContain('user-specified and selected visual designs, including their composition, subject proportions and spatial relationships')
+    expect(f.starts[1].systemContext).toContain('initial layout proposal remains to be developed in concrete visual work, not confirmed by document completion or review')
     expect(f.starts[1].systemContext.split(DESIGN_DECISION_SCOPE)).toHaveLength(2)
     expect(prompt).not.toContain('settled product decisions')
-    if (settings.engine === 'React') expect(prompt).toContain('Choose implementation and verification methods')
+    if (settings.engine === 'React') expect(prompt).not.toContain('Choose implementation and verification methods')
     else {
-      expect(prompt).toContain('Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested.')
+      expect(prompt).not.toContain('Alternative cosmetic preferences')
       expect(prompt).toContain('repair observed deviations')
     }
     if(settings.engine==='React') {
-      expect(f.starts[1].systemContext).toContain('Phaser for 2D and Three.js for 3D')
+      expect(f.starts[1].systemContext).not.toContain('Phaser for 2D and Three.js for 3D')
+      expect(f.starts[1].systemContext).toContain('User Preview runs in a sandboxed opaque iframe')
       expect(f.starts[1].systemContext).toContain('sandboxed opaque iframe')
       expect(f.starts[1].systemContext).toContain('localStorage/sessionStorage can throw')
     } else expect(f.starts[1].systemContext).not.toContain('Phaser')
@@ -2053,7 +2131,7 @@ for(const outcome of ['paused','failed'] as const)test(`unfinished GDD ${outcome
     expect(f.starts[1].systemContext).not.toContain('Self-check the complete confirmed scope')
     expect(f.starts[1].systemContext).not.toContain('Keep resources registered')
     expect(f.starts[1].systemContext).not.toContain('observe actual rendering')
-    expect(f.starts[1].systemContext).toContain('playable MVP')
+    expect(f.starts[1].systemContext).toContain('small-scope game with a complete core experience')
     expect(f.starts[1].systemContext).not.toContain('Determine the product decisions still needed')
     expect(f.submissions[0]!.prompt).toContain('BGS current production stage: design')
     expect(f.submissions[1]!.prompt).toEqual([])
@@ -2133,7 +2211,7 @@ for(const kind of ['blocked','stalled','invalid'] as const)test('preparation fin
   await seedGddOnlyRun(f,true)
   try {
     await f.call('/agent/goal','POST',f.body)
-    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt) && f.sessions.transcript(r.chatSessionId).some(e=>e.payload?.category==='workflow-blocked'))
     expect(run.status).toBe('blocked')
     expect(run.writer).toBeUndefined()
     expect(run.agentTurns![0]!.productionHandoff).toBeUndefined()
@@ -2266,30 +2344,31 @@ for(const intent of ['message','change'] as const)test(`confirmed platform and e
   })
   Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D'}})
   try {
+    await seedLegacyIsolatedRun(f,false)
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    let run=await f.wait(r=>r.agentTurns?.length===2 && Boolean(r.agentTurns[1]?.finishedAt) && !r.writer)
+    let run=await f.wait(r=>r.agentTurns?.length===1 && Boolean(r.agentTurns[0]?.finishedAt) && !r.writer)
     expect(run.status).toBe('completed')
     const confirmed=structuredClone(run.requirements.constraints)
     const request={requestKey:'later-target-request',runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,
       requirementsRevision:run.requirements.revision,intent,text:'Change the platform to PC and engine to Godot; revise only the design.'}
     expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
-    run=await f.wait(r=>Boolean(r.agentTurns?.[2]?.finishedAt))
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(run.requirements.constraints).toEqual(confirmed)
     expect(JSON.parse(run.requirements.text).settings).toEqual(confirmed)
-    expect(JSON.parse(f.submissions[2]!.confirmedBriefContext!).settings).toEqual(confirmed)
-    expect(f.submissions[2]!.prompt).toContain(request.text) // Keep the actual request, without silently rewriting it.
+    expect(JSON.parse(f.submissions[1]!.confirmedBriefContext!).settings).toEqual(confirmed)
+    expect(f.submissions[1]!.prompt).toContain(request.text) // Keep the actual request, without silently rewriting it.
     for(const start of f.starts) {
       expect(start.systemContext).toContain('These settings are fixed at project confirmation')
       expect(start.systemContext).toContain('Chat messages and design edits cannot change them')
     }
-    expect(f.starts[2].systemContext).toContain('BGS Scene/UI editor JSON and content/index.json are not production deliverables on any platform')
-    expect(f.starts[2].systemContext).not.toContain('Keep resources registered')
+    expect(f.starts[1].systemContext).toContain('BGS Scene/UI editor JSON and content/index.json are not production deliverables on any platform')
+    expect(f.starts[1].systemContext).not.toContain('Keep resources registered')
     const rejected={...request,requestKey:'unsupported-target-field',expectedVersion:run.version,
       requirementsRevision:run.requirements.revision,targetSettings:{platform:'PC',engine:'Godot'}}
     expect((await f.call('/agent/messages','POST',rejected)).status).toBe(400)
     expect((await f.call('/agent/goal','POST',{...f.body,brief:{...f.body.brief,settings:{platform:'PC',engine:'Godot'}}})).status).toBe(409)
     expect(await f.store.read(run.projectId,run.ownerId)).toEqual(run)
-    expect(f.submissions).toHaveLength(3)
+    expect(f.submissions).toHaveLength(2)
   }finally{await f.close()}
 })
 
@@ -2768,7 +2847,7 @@ for (const recovery of [false, true]) test('visual handoff and resume retain his
   const imageContexts: any[] = []
   const f = await fixture('normal', false, undefined, value => {
     imageContexts.push(value)
-    return { endpoint: 'http://127.0.0.1:1/offline-image', instruction: 'Existing fixture capability', close: async () => {} }
+    return { fetch: (request:Request) => fetch(new Request('http://127.0.0.1:1/offline-image', request)), instruction: 'Existing fixture capability', close: async () => {} }
   }, 0, {}, undefined, true, async (root, input, context) => {
     const contract = input.finalOutput
     if (contract?.designReview) {
@@ -3007,27 +3086,23 @@ test(`implementation chat optionally binds work, resumes after stop and complete
   }finally{await f.close()}
 },30000)
 
-test('a new implementation preserves visual selection, reusable checks and scope across stop and recovery', async () => {
+test('a historical continuous implementation preserves visual selection, reusable checks and scope across stop and recovery', async () => {
   let selected=false,resumed=false
   const script='export async function check(page) { return await page.title() }\n'
   const results=JSON.stringify({checks:[{scenario:'core',expected:'The core path works',observed:'The core path works',passed:true}]})
   const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input)=>{
-    if(input.finalOutput?.designReview) {
-      await input.finalOutput.writeDocument!.authorize()
-      await mkdir(join(root,'docs'),{recursive:true})
-      await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Look\nUse the retained target.\n')
-      await recordSyntheticDesignReview(input)
-      await input.finalOutput.accept({status:'ready',summary:'Reviewed 3D design'})
-      return
-    }
-    expect(input.finalOutput).toBeUndefined()
+    expect(input.finalOutput?.designReview).toBeDefined()
+    expect(input.finalOutput?.readOnly).not.toBe(true)
     expect(input.nativeGoal).toBeUndefined()
     expect(f.starts.at(-1).systemContext.split(DESIGN_DECISION_SCOPE)).toHaveLength(2)
     if(!resumed) {
       await mkdir(join(root,'tests'),{recursive:true})
       await writeFile(join(root,'tests/browser-check.mjs'),script)
       await writeFile(join(root,'tests/browser-results.json'),results)
-      expect(JSON.stringify(input.prompt)).toContain('Saved design input at task preparation')
+      expect(JSON.stringify(input.prompt)).toContain('one continuous authoring task')
+      await input.finalOutput!.writeDocument!.authorize()
+      await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Look\nUse the retained target.\n')
       await mkdir(join(root,'assets'),{recursive:true})
       await writeFile(join(root,'assets/look.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1/8AAAAASUVORK5CYII=','base64'))
       await input.workflow!({action:'implement',summary:'Current complete-game implementation',sections:[],files:[]})
@@ -3040,11 +3115,13 @@ test('a new implementation preserves visual selection, reusable checks and scope
       const archived=(await f.store.read('goal-project','owner'))!
       const withArchive=structuredClone(archived);withArchive.version++;withArchive.agentTurns!.at(-1)!.browserVerification=pending
       await f.store.commit(archived.projectId,archived.ownerId,archived.version,withArchive,'agent.browser-verification')
+      await recordSyntheticDesignReview(input)
       selected=true;f.setMode('wait')
     } else {
       expect(input.prompt).toEqual([])
       expect(f.starts.at(-1).systemContext).not.toContain('Saved design input at task preparation')
-      expect(input.finalOutput).toBeUndefined()
+      expect(input.finalOutput!.designReview!.previousReviews).toHaveLength(1)
+      await input.finalOutput!.accept({status:'ready',summary:'Completed using retained decisions and checks'})
       expect(await readFile(join(root,'tests/browser-check.mjs'),'utf8')).toBe(script)
       expect(await readFile(join(root,'tests/browser-results.json'),'utf8')).toBe(results)
     }
@@ -3052,8 +3129,9 @@ test('a new implementation preserves visual selection, reusable checks and scope
   })
   Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings:{platform:'Web',engine:'Three.js',dimension:'3D',orientation:'Landscape'}})
   try {
+    await seedLegacyIsolatedRun(f,false)
     await f.call('/agent/goal','POST',f.body)
-    await f.wait(run=>selected&&run.agentTurns!.length===2&&Boolean(run.agentTurns!.at(-1)!.visualSelection))
+    await f.wait(run=>selected&&run.agentTurns!.length===1&&Boolean(run.agentTurns!.at(-1)!.visualSelection))
     await f.call('/stop','POST')
     let run=await f.wait(run=>!run.writer&&run.agentTurns!.at(-1)!.status==='interrupted')
     const previous=run.agentTurns!.at(-1)!,target=structuredClone(previous.visualSelection)
@@ -3062,14 +3140,18 @@ test('a new implementation preserves visual selection, reusable checks and scope
     run=(await f.store.read(run.projectId,run.ownerId))!
     resumed=true;f.setMode('normal')
     expect((await f.call('/agent/messages','POST',{requestKey:'resume-selected-design',runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:previous.attemptId,text:''})).status).toBe(202)
-    run=await f.wait(run=>!run.writer&&run.agentTurns!.length===3)
-    expect(run.agentTurns!.map(turn=>turn.production?.stage)).toEqual(['design','implementation','implementation'])
-    expect(run.agentTurns![1]!.visualSelection).toEqual(target)
-    expect(run.agentTurns![1]!.browserVerification?.attempts[0]?.id).toBe('interrupted-batch')
-    expect(run.agentTurns![2]!.browserVerification).toBeUndefined()
-    expect(run.agentTurns![2]!.deliverySubmission).toBeUndefined()
+    run=await f.wait(run=>!run.writer&&run.agentTurns!.length===2)
+    expect(run.agentTurns!.map(turn=>turn.production?.stage)).toEqual(['implementation','implementation'])
+    expect(run.agentTurns![0]!.visualSelection).toEqual(target)
+    expect(run.agentTurns![0]!.browserVerification?.attempts[0]?.id).toBe('interrupted-batch')
+    expect(run.agentTurns![1]!.browserVerification).toBeUndefined()
+    expect(run.agentTurns![1]!.deliverySubmission).toBeUndefined()
     expect(run.status).toBe('completed')
-    expect(f.starts.at(-1).resumeSessionId).toBe(previous.nativeSessionId)
+    expect(f.starts[1].resumeSessionId).toBe(previous.nativeSessionId)
+    expect(f.starts).toHaveLength(2)
+    expect(f.submissions[1]!.implementationHandoff).toBeUndefined()
+    expect(f.submissions[1]!.finalOutput!.designReview!.previousReviews).toHaveLength(1)
+    expect(run.agentTurns![1]!.productionHandoff!.sources.map(source=>source.path)).toEqual(['docs/GDD.md','assets/look.png'])
     expect(f.submissions.every(input=>!input.nativeGoal)).toBe(true)
   } finally {await f.close()}
 },30_000)
@@ -3086,7 +3168,7 @@ test('implementation startup recovery requires matching no-submit evidence and r
       await writeFile(join(root, 'docs/GDD.md'), '# Synthetic\nRequired interaction.\n')
       await recordSyntheticDesignReview(input)
       await input.finalOutput.accept({status:'ready',summary:'Reviewed GDD ready'})
-    } else if (recovering) {
+    } else if (recovering && !input.finalOutput) {
       const restart = input.restartFromDesign
       if (evidence === 'submitted') {
         expect(restart).toBeUndefined()
@@ -3102,6 +3184,7 @@ test('implementation startup recovery requires matching no-submit evidence and r
   })
   Object.assign(f.body.brief, {creation_mode:'creative', build_source:null,
     settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Auto'}})
+  await seedGddOnlyRun(f,true)
   let snapshotSpy: ReturnType<typeof spyOn> | undefined
   try {
     await f.call('/agent/goal','POST',f.body)
@@ -3128,31 +3211,107 @@ test('implementation startup recovery requires matching no-submit evidence and r
   } finally { snapshotSpy?.mockRestore(); await f.close() }
 })
 
-test('new implementation completes on native result without a BGS browser report', async () => {
+test('continuous author startup-only recovery reuses the assignment without requiring an earlier design task',async()=>{
+  const faults={startupFailure:true}
+  const f=await fixture('normal',false,undefined,undefined,0,faults,undefined,true,async(root,input)=>{
+    expect(input.finalOutput?.readOnly).not.toBe(true)
+    expect(input.restartFromDesign?.prompt).toContain('one continuous authoring task')
+    expect(input.restartFromDesign?.prompt).not.toContain('Saved design input at task preparation')
+    await input.restartFromDesign!.authorize()
+    await input.finalOutput!.writeDocument!.authorize()
+    await mkdir(join(root,'docs'),{recursive:true})
+    await writeFile(join(root,'docs/GDD.md'),'# Decisions\nThe current game rules.\n')
+    await writeFile(join(root,'index.html'),'<canvas></canvas>')
+    await recordSyntheticDesignReview(input)
+    await input.finalOutput!.accept({status:'ready',summary:'Game with reviewed decisions'})
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D'}})
+  try {
+    await seedLegacyIsolatedRun(f,false)
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(r=>!r.writer&&r.agentTurns?.[0]?.status==='failed')
+    const failed=structuredClone(run.agentTurns![0]!)
+    expect(failed.error).toBe('Synthetic runner startup failed')
+    expect(f.submissions).toHaveLength(0)
+    await expect(readFile(join(f.root,'docs/GDD.md'))).rejects.toThrow()
+    faults.startupFailure=false
+    expect((await f.call('/agent/messages','POST',{requestKey:'recover-author',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:failed.attemptId,text:''})).status).toBe(202)
+    run=await f.wait(r=>!r.writer&&r.agentTurns?.length===2&&Boolean(r.agentTurns[1]?.finishedAt))
+    expect(run.status,run.blockedReason).toBe('completed')
+    expect(run.agentTurns![0]).toEqual(failed)
+    expect(run.agentTurns![1]!.production).toEqual(failed.production)
+    expect(run.agentTurns![1]!.designReviews).toHaveLength(1)
+    expect(run.agentTurns![1]!.productionHandoff?.next).toBeUndefined()
+    expect(f.submissions).toHaveLength(1)
+    expect(f.starts[1].resumeSessionId).toBe(failed.nativeSessionId)
+  }finally{await f.close()}
+},30000)
+
+test('historical continuous implementation builds, verifies and repairs in one native task without a separate report', async () => {
+  const checks:string[]=[]
+  let authorEntries=0
   const f = await fixture('normal', false, undefined, undefined, 0, {}, undefined, true, async (root, input) => {
     if (input.finalOutput?.designReview) {
+      expect(input.finalOutput.readOnly).not.toBe(true)
       await input.finalOutput.writeDocument!.authorize()
       await mkdir(join(root, 'docs'), { recursive: true })
       await writeFile(join(root, 'docs/GDD.md'), '# Synthetic\nRequired interaction.\n')
+      expect(input.implementationHandoff).toBeUndefined()
+      expect(input.baseInstructions).toBeUndefined()
+      if(++authorEntries>1)return
+      const prompt=typeof input.prompt==='string'?input.prompt:input.prompt.map((block:any)=>block.type==='text'?block.text:'').join('\n')
+      expect(prompt).toContain('repair observed deviations')
+      expect(prompt).toContain('checks actually performed')
+      expect(prompt).not.toContain('separate verification assignment')
+      const entry=await input.workflow!({action:'implement',summary:'Current implementation',sections:[],files:[]})
+      expect(entry).not.toHaveProperty('next')
+      for(const step of ['build','check-failed','repair','check-passed']) {
+        checks.push(step)
+        await input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'tool.completed',toolName:'Shell',toolUseID:step,output:step})
+      }
+      await input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'assistant.message',text:'Affected behavior passed after repair; audio listening remains unverified.'})
       await recordSyntheticDesignReview(input)
-      await input.finalOutput.accept({ status: 'ready', summary: 'Design ready' })
-    } else expect(input.finalOutput).toBeUndefined()
+      await input.finalOutput.accept({status:'ready',summary:'Game and current decisions ready'})
+    } else {
+      expect(input.finalOutput).toBeUndefined()
+      expect(input.implementationHandoff).toBeUndefined()
+    }
   })
   Object.assign(f.body.brief, { creation_mode: 'creative', build_source: null,
     settings: { platform: 'Web', engine: 'React', dimension: '2D', orientation: 'Auto' } })
   try {
+    await seedLegacyIsolatedRun(f,false)
     await f.call('/agent/goal', 'POST', f.body)
-    const run = await f.wait(r => r.agentTurns?.length === 2 && !r.writer && Boolean(r.agentTurns.at(-1)?.finishedAt))
-    expect(run.status).toBe('completed')
+    let run = await f.wait(r => r.agentTurns?.length === 1 && !r.writer && Boolean(r.agentTurns.at(-1)?.finishedAt))
+    expect(run.agentTurns!.map(t=>t.production?.stage)).toEqual(['implementation'])
+    expect(f.submissions).toHaveLength(1)
+    expect(f.starts[0]!.workflowDescription).toContain('Complete the authorized implementation through native completion')
+    expect(checks).toEqual(['build','check-failed','repair','check-passed'])
+    expect(run.status,run.blockedReason).toBe('completed')
     expect(run.blockedReason).toBeUndefined()
-    expect(run.agentTurns!.at(-1)!.browserVerification).toBeUndefined()
+    expect(run.agentTurns![0]!.productionHandoff).not.toHaveProperty('next')
+    expect(run.agentTurns!.every(t=>!t.implementationVerification)).toBe(true)
+    expect(run.deliveryEligible).toBe(false)
+    const original=structuredClone(run.agentTurns![0])
+    const before=f.submissions.length
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    expect(f.submissions).toHaveLength(before)
+    expect((await f.call('/agent/messages','POST',{requestKey:'later-small-fix',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Fix the requested control label.'})).status).toBe(202)
+    run=await f.wait(r=>r.agentTurns?.length===2&&!r.writer&&Boolean(r.agentTurns[1]?.finishedAt))
+    expect(run.status,run.blockedReason).toBe('completed')
+    expect(run.agentTurns![0]).toEqual(original)
+    expect(f.submissions).toHaveLength(2)
+    expect(f.submissions[1]!.finalOutput).toBeUndefined()
+    expect(f.submissions[1]!.implementationHandoff).toBeUndefined()
   } finally { await f.close() }
 })
 
 test('automatic direction reaches the Agent unchanged without fixing the image capability to landscape or portrait',async()=>{
   const calls:any[]=[]
   const f=await fixture('normal',false,undefined,value=>{
-    calls.push(value);return{endpoint:'http://127.0.0.1:1/offline',instruction:'No image generation',close:async()=>{}}
+    calls.push(value);return{fetch: (request:Request) => fetch(new Request('http://127.0.0.1:1/offline', request)),instruction:'No image generation',close:async()=>{}}
   },0,{},undefined,false,async root=>{
     const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(root,f.body.chatSessionId),'utf8'))
     expect((await fetch(capability.assets.imageEndpoint)).status).toBe(409)
@@ -3199,8 +3358,8 @@ test('GDD review lineage survives interrupted design and stays isolated from new
       if(mode==='continue-after-pass') {
         expect(review.previousReviews).toHaveLength(2)
         const result={status:'ready',summary:'Revised source',reviewResponses:[response]}
-        expect(await review.candidate(result)).not.toHaveProperty('reviewResponses')
-        await expect(review.candidate({...result,reviewResponses:[{...response,finding:99}]})).rejects.toThrow('GDD author round 3')
+        expect(await review.candidate(result)).toMatchObject({reviewResponses:[response]})
+        expect(await review.candidate({status:'ready',summary:'Same reviewed source, no author envelope'})).toHaveProperty('source')
         await input.finalOutput!.accept(result)
         return
       }
@@ -3208,8 +3367,9 @@ test('GDD review lineage survives interrupted design and stays isolated from new
       expect(review.previousReviews).toHaveLength(sameScope?1:0)
       if(sameScope) {
         expect(review.previousReviews![0]!.nativeThreadId).toBe('saved-review-1')
-        expect(input.finalOutput!.schema).toMatchObject({anyOf:[{required:['status','summary','reviewResponses']},{}]})
-        await expect(review.candidate({status:'ready',summary:'Missing disposition'})).rejects.toThrow('GDD author round 2')
+        expect(input.finalOutput!.schema).toMatchObject({type:'object',required:['status','summary']})
+        expect(input.finalOutput!.schema).not.toHaveProperty('anyOf')
+        expect(await review.candidate({status:'ready',summary:'Saved revision without author envelope'})).toHaveProperty('source')
         await expect(input.finalOutput!.accept({status:'ready',summary:'No new review'})).rejects.toThrow()
       }
       if(mode!=='continue-twice'||index===2) {
@@ -3228,6 +3388,7 @@ test('GDD review lineage survives interrupted design and stays isolated from new
     await new Promise<void>(resolve=>{if(input.signal.aborted)resolve();else input.signal.addEventListener('abort',()=>resolve(),{once:true})})
   })
   Object.assign(f.body.brief,{creation_mode:'creative',settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Auto'}})
+  await seedGddOnlyRun(f,true)
   try {
     await f.call('/agent/goal','POST',f.body)
     await f.wait(()=>waiting===1)
@@ -3272,10 +3433,10 @@ test('author preview reuses its service, cleans it on pause and opens again thro
   const f=await fixture('wait',false,undefined,undefined,0,{},undefined,false,async(root,input)=>{
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'node dev.cjs'}}))
     const before=await input.workflow!({action:'preview',operation:'status'},input.signal) as any
-    expect(before.status).not.toBe('running')
+    expect(before.status).not.toBe('running');expect(before.url).toBeUndefined()
     const [a,b]=await Promise.all([input.workflow!({action:'preview',operation:'start'},input.signal),
       input.workflow!({action:'preview',operation:'start'},input.signal)]) as any[]
-    expect(a.status).toBe('running');expect(a.url).toBe('http://127.0.0.1:63100/')
+    expect(a.status).toBe('running');expect(a.url).toBe(new URL(manager.runningForWorkspace(root)!.url,'http://localhost').href)
     expect(b).toEqual(a);checks++
     await expect(input.workflow!({action:'preview',operation:'start',workspacePath:'/another-project'},input.signal)).rejects.toThrow()
   },()=>manager)
@@ -3301,11 +3462,11 @@ test('author preview reuses its service, cleans it on pause and opens again thro
 test('author inspection reuses an existing user preview without closing or restarting it', async () => {
   let launches=0,stops=0
   const manager=new BeeGamePreviewManager(()=>{launches++;let finish!:()=>void;return {kill(){stops++;finish()},exited:new Promise<void>(resolve=>{finish=resolve})}},
-    63100,async()=>63100,async()=>true)
+    63100,async()=>63100,async()=>true,'https://preview.example/previews')
   const f=await fixture('normal',false,undefined,undefined,0,{},undefined,false,async(_root,input)=>{
     const preview=await input.workflow!({action:'preview',operation:'start'},input.signal) as any
     expect(preview.status).toBe('running')
-    expect(preview.url).toBe('http://127.0.0.1:63100/')
+    expect(preview.url).toBe(new URL(manager.status('user-preview',f.root).url,'http://localhost').href)
   },()=>manager)
   try {
     await writeFile(join(f.root,'package.json'),JSON.stringify({scripts:{dev:'node dev.cjs'}}))
@@ -3341,4 +3502,411 @@ for (const transport of ['native','legacy-http'] as const) test(`pausing the aut
     expect(run.agentTurns![0]!.status).toBe('interrupted')
     expect(manager.runningForWorkspace(f.root)).toBeUndefined()
   }finally{await f.close();manager.dispose()}
+})
+
+
+// The existing local session fixture exercises the real production scheduler,
+// fresh/resume selection, CAS ownership and native-result callbacks.
+test('isolated verification keeps build history out and returns aggregate repair to the original author',async()=>{
+  let verifications=0
+  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    if(input.finalOutput?.designReview) {
+      await input.finalOutput.writeDocument!.authorize()
+      await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Required interaction\nDESIGN_BODY_ONLY_WHEN_READ\n')
+      await recordSyntheticDesignReview(input)
+      await input.finalOutput.accept({status:'ready',summary:'Current required interaction defined'})
+    } else if(input.finalOutput?.readOnly) {
+      verifications++
+      expect(input.imageGenerationEntry).toBeUndefined()
+      const context=String(f.starts.at(-1).systemContext)
+      expect(context).not.toContain('AUTHOR_TOOL_HISTORY')
+      expect(context).not.toContain('DESIGN_BODY_ONLY_WHEN_READ')
+      expect(context).not.toContain('read the applicable artwork-production guidance')
+      const prompt=typeof input.prompt==='string'?input.prompt:input.prompt.map((block:any)=>block.type==='text'?block.text:'').join('\n')
+      expect(prompt.split('DESIGN_BODY_ONLY_WHEN_READ')).toHaveLength(2)
+      expect(input).not.toHaveProperty('preferredSkill')
+      expect(input.baseInstructions).toContain('You are the independent runtime verifier')
+      expect(input.baseInstructions).toContain('rather than inferring completion from object or control presence')
+      expect(input.baseInstructions).toContain('Ordinary aesthetic alternatives within a satisfied treatment are not product defects')
+      expect(prompt).not.toContain('Return the final JSON result:')
+      expect(input.baseInstructions).toContain('BGS derives the existing pass, repair or blocked outcome')
+      expect(context).toContain('Observed input at 640x360; result captured in checks/result.json; remaining sound observation unverified')
+      expect(context).toContain('checks/replay.mjs')
+      expect(context).not.toContain('BRIEF_FINAL_WITHOUT_OBSERVATIONS')
+      await expect(input.workflow!({action:'implement',summary:'Bypass repair',sections:[],files:[]})).rejects.toMatchObject({code:'verification-read-only'})
+      await input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'tool.completed',toolName:'Browser',toolUseID:'verification-only-'+verifications,output:'VERIFIER_TOOL_HISTORY'})
+      await input.finalOutput.accept(verifications===1
+        ? {summary:'Other required checks passed; the changed input path needs correction.',observations:[{outcome:'Required input feedback',status:'failed',evidence:'Input accepted but expected feedback absent in the captured passage.'}]}
+        : {summary:'Affected input now produces feedback; unchanged observations reused.',observations:[{outcome:'Required input feedback',status:'passed',evidence:'Affected input now produces feedback under the same conditions; unchanged observations reused.'}]})
+    } else {
+      if(input.implementationHandoff)expect(input.baseInstructions).toContain('You are the implementation author')
+      else expect(input.baseInstructions).toBeUndefined()
+      if(verifications===1) {
+        const context=String(f.starts.at(-1).systemContext)
+        expect(context).toContain('Input accepted but expected feedback absent')
+        expect(context).not.toContain('VERIFIER_TOOL_HISTORY')
+      }
+      await input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'tool.completed',toolName:'Shell',toolUseID:'author-only-'+verifications,output:'AUTHOR_TOOL_HISTORY'})
+      if(input.implementationHandoff) {
+        const authorPrompt=typeof input.prompt==='string'?input.prompt:input.prompt.map((block:any)=>block.type==='text'?block.text:'').join('\n')
+        expect(authorPrompt).toContain('Before specialist work, read the applicable Skills and necessary references from the available catalog')
+        expect(authorPrompt).toContain('When existing evidence is insufficient for the current question, use available search tools')
+        expect(String(f.starts.at(-1).systemContext)).not.toContain('Before specialist work,')
+        await mkdir(join(root,'checks'),{recursive:true})
+        await writeFile(join(root,'checks/replay.mjs'),'// Existing reusable fixture scenario\n')
+        await writeFile(join(root,'checks/result.json'),JSON.stringify({condition:'640x360',observed:'input accepted'}))
+        const summary='Observed input at 640x360; result captured in checks/result.json; remaining sound observation unverified'
+        await input.workflow!({action:'advance',summary,sections:[],files:['checks/replay.mjs','checks/result.json']})
+        expect(input.implementationHandoff()).toBe(summary)
+        await input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'assistant.message',text:'BRIEF_FINAL_WITHOUT_OBSERVATIONS'})
+      }
+    }
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Auto'}})
+  await seedLegacyIsolatedRun(f)
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(r=>r.agentTurns?.length===5 && r.status==='completed' && !r.writer)
+    expect(run.agentTurns!.map(t=>t.production?.stage)).toEqual(['design','implementation','verification','implementation','verification'])
+    const author=run.agentTurns![1]!,repair=run.agentTurns![3]!
+    expect(f.submissions[1]!).not.toHaveProperty('preferredSkill')
+    expect(f.submissions[3]!).not.toHaveProperty('preferredSkill')
+    expect(f.submissions[2]!).not.toHaveProperty('preferredSkill')
+    expect(f.starts[2].resumeSessionId).toBeUndefined()
+    expect(f.starts[2].finalOutput.readOnly).toBe(true)
+    expect(run.agentTurns![2]!.nativeSessionId).not.toBe(author.nativeSessionId)
+    expect(f.starts[3].resumeSessionId).toBe(author.nativeSessionId)
+    expect(repair.nativeSessionId).toBe(author.nativeSessionId)
+    expect(f.starts[4].resumeSessionId).toBeUndefined()
+    expect(run.agentTurns![4]!.nativeSessionId).not.toBe(run.agentTurns![2]!.nativeSessionId)
+    expect(run.agentTurns![4]!.production!.verificationOf).toBe(repair.attemptId)
+    expect(run.agentTurns![2]!.implementationVerification?.status).toBe('needs-repair')
+    expect(run.agentTurns![4]!.implementationVerification?.status).toBe('passed')
+    const forged=structuredClone(run);forged.version++;forged.agentTurns![4]!.implementationVerification!.summary='Rewritten result'
+    await expect(f.store.commit(run.projectId,run.ownerId,run.version,forged,'forged.verification')).rejects.toThrow('history')
+    expect(run.agentTurns!.every(t=>t.status==='ended'&&t.quiescedAt)).toBe(true)
+    expect(f.sessions.transcript(run.chatSessionId).filter(e=>e.type==='user.message')).toHaveLength(1)
+    expect(f.submissions.every(input=>!input.nativeGoal)).toBe(true)
+    expect(run.deliveryEligible).toBe(false)
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    expect(f.submissions).toHaveLength(5)
+    expect((await f.call('/agent/messages','POST',{requestKey:'question-after-check',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,text:'Explain the completed checks only.'})).status).toBe(202)
+    run=await f.wait(r=>r.agentTurns?.length===6&&Boolean(r.agentTurns[5]!.finishedAt)&&!r.writer)
+    expect(f.submissions).toHaveLength(6)
+    // An ordinary user task must not inherit the custom staged-author base.
+    expect(f.starts[5].resumeSessionId).toBeUndefined()
+    expect(f.starts[5].baseInstructions).toBeUndefined()
+    expect(f.submissions[5]!.baseInstructions).toBeUndefined()
+    expect(run.agentTurns![1]!.nativeSessionId).toBe(author.nativeSessionId)
+    expect(run.agentTurns![5]!.implementationVerification).toBeUndefined()
+    expect(run.status).toBe('completed')
+  }finally{await f.close()}
+},30000)
+
+for(const outcome of ['blocked','invalid','missing'] as const)test('isolated verification '+outcome+' cannot complete or schedule repair',async()=>{
+  const f=await fixture('normal',false,undefined,undefined,0,{omitVerificationResult:true},undefined,true,async(root,input)=>{
+    if(input.finalOutput?.designReview) {
+      await input.finalOutput.writeDocument!.authorize();await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Required interaction\nOne runnable interaction.\n')
+      await recordSyntheticDesignReview(input);await input.finalOutput.accept({status:'ready',summary:'Required interaction defined'})
+    } else if(input.finalOutput?.readOnly && outcome!=='missing')
+      await input.finalOutput.accept(outcome==='blocked'
+        ? {summary:'All checks passed.',observations:[{outcome:'Required controlled player action',status:'unverified',evidence:'The required controlled input was not observed; only a stationary result was captured.'}]}
+        : {summary:'No valid observations',observations:[]})
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  await seedLegacyIsolatedRun(f)
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>r.agentTurns?.length===3&&Boolean(r.agentTurns[2]!.finishedAt)&&!r.writer)
+    expect(run.status).toBe('blocked')
+    expect(f.submissions).toHaveLength(3)
+    expect(run.agentTurns![2]!.productionHandoff).toBeUndefined()
+    expect(run.agentTurns![2]!.status).toBe(outcome==='blocked'?'ended':'failed')
+    expect(run.agentTurns![2]!.implementationVerification?.status).toBe(outcome==='blocked'?'blocked':undefined)
+    expect(run.blockedReason).toContain(outcome==='blocked'?'required controlled input':outcome==='invalid'?'observations':'without a valid native result')
+  }finally{await f.close()}
+})
+
+test('isolated verification stop and native resume retain role, author link and read-only result boundary',async()=>{
+  let entered=false,verifications=0,lateAccept:((value:unknown)=>Promise<string>)|undefined
+  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    if(input.finalOutput?.designReview) {
+      await input.finalOutput.writeDocument!.authorize();await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Required interaction\nOne current target.\n')
+      await recordSyntheticDesignReview(input);await input.finalOutput.accept({status:'ready',summary:'Ready to implement'})
+    } else if(input.finalOutput?.readOnly && ++verifications===1) {
+      const prompt=typeof input.prompt==='string'?input.prompt:input.prompt.map((block:any)=>block.type==='text'?block.text:'').join('\n')
+      expect(prompt.split('One current target.')).toHaveLength(2)
+      expect(input).not.toHaveProperty('preferredSkill')
+      lateAccept=input.finalOutput.accept;entered=true
+      await new Promise<void>(resolve=>input.signal.addEventListener('abort',()=>resolve(),{once:true}))
+    }
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  await seedLegacyIsolatedRun(f)
+  try {
+    await f.call('/agent/goal','POST',f.body);await f.wait(()=>entered)
+    await f.call('/stop','POST');let run=await f.wait(r=>Boolean(r.paused)&&!r.writer)
+    const stopped=run.agentTurns!.at(-1)!,author=run.agentTurns![1]!
+    expect(stopped.production?.stage).toBe('verification')
+    expect(stopped.status).toBe('interrupted')
+    await expect(lateAccept!({summary:'Late result',observations:[{outcome:'Required current action',status:'passed',evidence:'Current action was observed'}]})).rejects.toMatchObject({code:'stale-attempt'})
+    expect(f.submissions).toHaveLength(3)
+    await f.call('/resume','POST',{planRevision:run.planRevision});run=(await f.store.read(run.projectId,run.ownerId))!
+    expect(f.submissions).toHaveLength(3)
+    expect((await f.call('/agent/messages','POST',{requestKey:'resume-check',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:stopped.attemptId,text:''})).status).toBe(202)
+    run=await f.wait(r=>r.agentTurns?.length===4&&r.status==='completed'&&!r.writer)
+    expect(f.starts[3].resumeSessionId).toBe(stopped.nativeSessionId)
+    expect(f.starts[3].finalOutput.readOnly).toBe(true)
+    expect(f.submissions[3]!.prompt).toEqual([])
+    expect(f.submissions[3]!).not.toHaveProperty('preferredSkill')
+    expect(f.starts[3].baseInstructions).toBe(f.starts[2].baseInstructions)
+    expect(f.submissions[3]!.baseInstructions).toContain('independent runtime verifier')
+    expect(f.starts[3]!.workflowDescription).toBe(f.starts[2]!.workflowDescription)
+    expect(f.submissions[3]!.workflowDescription).toBe(f.submissions[2]!.workflowDescription)
+    expect(run.agentTurns![3]!.production!.verificationOf).toBe(author.attemptId)
+    expect(run.agentTurns![3]!.implementationVerification?.status).toBe('passed')
+    expect(run.agentTurns![2]!).toEqual(stopped)
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe('# Required interaction\nOne current target.\n')
+  }finally{await f.close()}
+},30000)
+
+for(const mode of ['ready','source-changed','stop-after-ready'] as const)
+test('explicit implementation readiness uses the existing isolated scheduler: '+mode,async()=>{
+  let reached=false
+  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    if(input.finalOutput?.designReview){
+      await input.finalOutput.writeDocument!.authorize();await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Confirmed interaction\nCurrent design.\n')
+      await recordSyntheticDesignReview(input);await input.finalOutput.accept({status:'ready',summary:'Design ready'})
+    }else if(input.finalOutput?.readOnly){
+      await input.finalOutput.accept({summary:'Observed required behavior',observations:[{outcome:'Required current behavior',status:'passed',evidence:'Delivered runtime produced the required behavior'}]})
+    }else{
+      expect(input.baseInstructions).toContain('Your deliverable is runnable code and integrated resources')
+      if(input.nativeRecovery){
+        expect(input.baseInstructions).toBe(f.submissions[1]!.baseInstructions)
+        expect(input.implementationHandoff?.()).toBe('Runnable source; systematic checks remain');return
+      }
+      expect(input.implementationHandoff?.()).toBeUndefined()
+      const entry=await input.workflow!({action:'implement',summary:'Enter current work',sections:[],files:[]})
+      expect(entry).not.toHaveProperty('next')
+      expect(input.implementationHandoff?.()).toBeUndefined()
+      await writeFile(join(root,'entry.js'),'export const ready=true;\n')
+      const request={action:'advance',summary:'Runnable source; systematic checks remain',sections:[],files:['entry.js']}
+      const handoff=await input.workflow!(request)
+      expect(handoff).toMatchObject({next:{stage:'verification'}})
+      expect(input.implementationHandoff?.()).toBe(request.summary)
+      expect(await input.workflow!(request)).toEqual(handoff)
+      reached=true
+      if(mode==='source-changed')await writeFile(join(root,'entry.js'),'Changed after readiness')
+      if(mode==='stop-after-ready')await new Promise<void>(resolve=>input.signal.addEventListener('abort',()=>resolve(),{once:true}))
+    }
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  await seedLegacyIsolatedRun(f)
+  try{
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>reached)
+    if(mode==='stop-after-ready'){
+      await f.call('/stop','POST');run=await f.wait(r=>Boolean(r.paused)&&!r.writer)
+      const stopped=run.agentTurns!.at(-1)!
+      expect(stopped.status).toBe('interrupted')
+      expect(stopped.productionHandoff?.next?.stage).toBe('verification')
+      await f.call('/resume','POST',{planRevision:run.planRevision});run=(await f.store.read(run.projectId,run.ownerId))!
+      await f.call('/agent/messages','POST',{requestKey:'resume-ready',runId:run.id,chatSessionId:run.chatSessionId,
+        expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:stopped.attemptId,text:''})
+      run=await f.wait(r=>r.status==='completed'&&!r.writer)
+      expect(f.submissions[2]!.prompt).toEqual([])
+      expect(run.agentTurns!.map(t=>t.production?.stage)).toEqual(['design','implementation','implementation','verification'])
+      expect(run.agentTurns!.at(-1)!.production!.verificationOf).toBe(run.agentTurns![2]!.attemptId)
+      expect(run.agentTurns![1]!).toEqual(stopped)
+    }else{
+      run=await f.wait(r=>!r.writer && (mode==='source-changed'?r.agentTurns!.at(-1)!.status==='failed':r.status==='completed'))
+      expect(run.status).toBe(mode==='source-changed'?'blocked':'completed')
+      expect(run.agentTurns!.map(t=>t.production?.stage)).toEqual(mode==='source-changed'?['design','implementation']:['design','implementation','verification'])
+      if(mode==='source-changed')expect(run.blockedReason).toContain('source changed')
+      else expect(run.agentTurns![2]!.production!.verificationOf).toBe(run.agentTurns![1]!.attemptId)
+    }
+  }finally{await f.close()}
+},20000)
+
+for(const delivery of ['missing','intact','changed'] as const)
+test('required library delivery is checked at native completion: '+delivery,async()=>{
+  const example=assetManifestAuthoringExamples().canonical,item=example.resources[0]!
+  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    if(input.finalOutput?.designReview){
+      await input.finalOutput.writeDocument!.authorize();await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Required scope\nUse the resource library.\n')
+    }
+    if(delivery!=='missing') {
+      await mkdir(join(root,'assets/runtime/example'),{recursive:true})
+      await writeFile(join(root,item.root_path),'{}')
+      await produceResources(root,{operation:'register',
+        projectTarget:{...example.project_target!,resource_library_usage:'required'},requirements:example.requirements,
+        resources:[{id:item.id,fulfills:item.fulfills,root_path:item.root_path,file_paths:item.file_paths,provisional:false,
+          reason:'Synthetic library data',selection_reason:['Required source'],source:{type:'resource-library',pack_id:'fixture-pack',pack_version:'1',element_id:'element',element_path:'data/item.json'}}]},undefined,'required')
+      if(delivery==='changed')await writeFile(join(root,item.root_path),'corrupt')
+    }
+    await recordSyntheticDesignReview(input);await input.finalOutput!.accept({status:'ready',summary:'Game and design ready'})
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,resource_library_usage:'required',
+    settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Auto',resourceLibraryUsage:'required'}})
+  try{
+    await seedLegacyIsolatedRun(f,false)
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    const run=await f.wait(r=>r.agentTurns?.length===1&&Boolean(r.agentTurns[0]!.finishedAt)&&!r.writer)
+    expect(run.status).toBe(delivery==='intact'?'completed':'blocked')
+    expect(run.agentTurns![0]!.status).toBe(delivery==='intact'?'ended':'failed')
+    if(delivery==='missing')expect(run.agentTurns![0]!.error).toContain('resource_library_usage=required')
+    if(delivery==='changed')expect(run.agentTurns![0]!.error).toContain('hash')
+    expect(run.agentTurns![0]!.productionHandoff?.next).toBeUndefined()
+    expect(run.deliveryEligible).toBe(false)
+    expect(f.submissions).toHaveLength(1)
+  }finally{await f.close()}
+},30000)
+
+test('an unsupported verifier pass for broken required library delivery uses the existing author repair loop',async()=>{
+  let verifications=0
+  const example=assetManifestAuthoringExamples().canonical,item=example.resources[0]!
+  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    if(input.finalOutput?.designReview){
+      await input.finalOutput.writeDocument!.authorize();await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),'# Required scope\nUse the resource library.\n')
+      await recordSyntheticDesignReview(input);await input.finalOutput.accept({status:'ready',summary:'Design ready'})
+    }else if(input.finalOutput?.readOnly){
+      verifications++
+      // Simulate an external resource change after the source-bound handoff.
+      // A model claim cannot override the existing integrity evidence.
+      if(verifications===1)await writeFile(join(root,item.root_path),'corrupt')
+      await input.finalOutput.accept({summary:'Synthetic runtime observations passed',observations:[{outcome:'Required runtime outcome',status:'passed',evidence:'Current player outcome observed'}]})
+    }else{
+      await mkdir(join(root,'assets/runtime/example'),{recursive:true})
+      await writeFile(join(root,item.root_path),'{}')
+      if(!verifications)await produceResources(root,{operation:'register',
+        projectTarget:{...example.project_target!,resource_library_usage:'required'},requirements:example.requirements,
+        resources:[{id:item.id,fulfills:item.fulfills,root_path:item.root_path,file_paths:item.file_paths,provisional:false,
+          reason:'Synthetic library data',selection_reason:['Required source'],source:{type:'resource-library',pack_id:'fixture-pack',pack_version:'1',element_id:'element',element_path:'data/item.json'}}]},undefined,'required')
+    }
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,resource_library_usage:'required',
+    settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Auto',resourceLibraryUsage:'required'}})
+  await seedLegacyIsolatedRun(f)
+  try{
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    const run=await f.wait(r=>r.status==='completed'&&r.agentTurns?.length===5&&!r.writer)
+    expect(run.agentTurns!.map(t=>t.production?.stage)).toEqual(['design','implementation','verification','implementation','verification'])
+    expect(run.agentTurns![2]!.implementationVerification?.status).toBe('needs-repair')
+    expect(run.agentTurns![2]!.implementationVerification?.findings.join(' ')).toContain('hash')
+    expect(run.agentTurns![4]!.implementationVerification?.status).toBe('passed')
+    expect(verifications).toBe(2)
+    expect(run.agentTurns![3]!.productionHandoff!.sources.some(source=>source.path===item.root_path)).toBe(true)
+  }finally{await f.close()}
+},30000)
+
+
+test('GDD optional image access is reference-only on initial execution and stopped-task recovery', async () => {
+  let seen = 0, reviewed = false, opened = 0, closed = 0
+  const contexts: Array<{requireGdd:boolean}> = []
+  const image = Bun.serve({hostname:'127.0.0.1',port:0,fetch(){return Response.json({available:true})}})
+  const f = await fixture('wait',false,undefined,value=>{
+    contexts.push(value);opened++
+    return {fetch: (request:Request) => fetch(new Request(image.url.origin, request)),instruction:'Existing reference service',close:async()=>{closed++}}
+  },0,{},undefined,true,async(root,input,context)=>{
+    const contract = input.finalOutput!
+    expect(contract.readOnly).toBe(true)
+    expect(contract.writeDocument!.path).toBe('docs/GDD.md')
+    expect(input.workflow).toBeDefined()
+    expect(input.imageGenerationEntry).toBeDefined()
+    expect(input.prompt).not.toContain('and actual pictures')
+    expect(context).not.toContain('and actual pictures')
+    const prompt=typeof input.prompt==='string'?input.prompt:input.prompt.map((block:any)=>block.type==='text'?block.text:'').join('\n')
+    if(input.nativeRecovery) expect(input.prompt).toEqual([])
+    else {
+      expect(prompt).not.toContain('Before specialist work, read the applicable Skills and necessary references from the available catalog')
+      expect(prompt).not.toContain('When existing evidence is insufficient for the current question, use available search tools')
+    }
+    expect(context).not.toContain('Before specialist work,')
+    expect(contract.designReview!.context).not.toContain('Before specialist work,')
+    expect(contract.designReview!.context).not.toContain('use available search tools')
+    expect(context).toContain('design-reference tools directory')
+    expect(context).not.toContain('Register delivered files')
+    expect(contract.designReview!.context).not.toContain('design-reference tools directory')
+    expect(contract.designReview!.context).not.toContain('imagegen')
+    const capability = JSON.parse(await readFile(projectPreviewCapabilityPath(root,f.body.chatSessionId),'utf8'))
+    expect(capability.assets).not.toHaveProperty('registrationEndpoint')
+    const denied = await fetch(capability.assets.imageEndpoint,{method:'POST',body:JSON.stringify({purpose:'production',prompt:'not authorized here'})})
+    expect(denied.status).toBe(403)
+    expect((await fetch(capability.assets.imageEndpoint)).status).toBe(200)
+    seen++
+    if (!input.workflow) throw Error('Expected existing selection capability')
+    for (const action of ['advance','preview','implement','resources','visual'])
+      await expect(input.workflow({action,summary:'Forbidden production',sections:[],files:[]})).rejects.toThrow('Design may inspect status or select reference images')
+    if (seen === 1) {
+      await mkdir(join(root,'assets/reference'),{recursive:true})
+      await writeFile(join(root,'assets/reference/treatment.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
+      const chosen=await input.workflow({action:'select-visual',summary:'Selected before writing GDD',sections:[],files:['assets/reference/treatment.svg']}) as any
+      expect(chosen.next).toBeUndefined()
+      expect(chosen.sources.map((s:any)=>s.path)).toEqual(['assets/reference/treatment.svg'])
+      await mkdir(join(root,'docs'),{recursive:true})
+      await contract.writeDocument!.authorize()
+      await writeFile(join(root,'docs/GDD.md'),'# Synthetic GDD\n\n## Visual direction\nShared scene and UI treatment.\n')
+      await recordSyntheticDesignReview(input)
+      reviewed = true
+    } else {
+      expect(contract.designReview!.previousReviews).toHaveLength(1)
+      const status=await input.workflow({action:'status'}) as any
+      expect(status.assignment.precedingSources.files).toContain('assets/reference/treatment.svg')
+      await contract.accept({status:'ready',summary:'Existing design and optional reference access retained.'})
+    }
+  })
+  try {
+    await seedGddOnlyRun(f)
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    await f.wait(()=>reviewed)
+    await f.call('/stop','POST')
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt)&&!r.writer)
+    expect(closed).toBe(1)
+    await f.call('/resume','POST',{planRevision:run.planRevision})
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    f.setMode('normal')
+    expect((await f.call('/agent/messages','POST',{requestKey:'reference-continue',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',text:'',
+      continuationOf:run.agentTurns![0]!.attemptId})).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt)&&!r.writer)
+    expect(seen).toBe(2);expect(opened).toBe(2);expect(closed).toBe(2)
+    expect(contexts.map(x=>x.requireGdd)).toEqual([false,false])
+    expect(run.agentTurns![1]!.status,JSON.stringify(run.agentTurns![1])).toBe('ended')
+    expect(run.agentTurns![1]!.productionHandoff!.sources.map(x=>x.path)).toEqual(['docs/GDD.md','assets/reference/treatment.svg'])
+  } finally {await f.close();image.stop(true)}
+},30000)
+
+
+for(const mode of ['development','production'] as const) test(`author preserves ownership and mode of a user preview still in planning: ${mode}`,async()=>{
+  let entered!:()=>void,release!:()=>void,launches=0,stops=0
+  const planning=new Promise<void>(resolve=>entered=resolve),gate=new Promise<void>(resolve=>release=resolve)
+  const manager=new BeeGamePreviewManager(()=>{
+    launches++;let finish!:()=>void
+    return {kill(){stops++;finish()},exited:new Promise<void>(resolve=>finish=resolve)}
+  },63100,async()=>{entered();await gate;return 63100},async()=>true)
+  const f=await fixture('normal',false,undefined,undefined,0,{},undefined,false,async(_root,input)=>{
+    const joined=input.workflow!({action:'preview',operation:'start'},input.signal)
+    if(mode==='production')await expect(joined).rejects.toMatchObject({code:'preview-conflict'})
+    release()
+    if(mode==='development')expect(await joined).toMatchObject({status:'running'})
+  },()=>manager)
+  try{
+    await writeFile(join(f.root,'package.json'),JSON.stringify({scripts:{dev:'node dev.cjs',preview:'node preview.cjs'}}))
+    const userStart=manager.start({sessionId:f.body.chatSessionId,workspacePath:f.root,mode})
+    await planning
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.agentTurns![0]!.status).toBe('ended')
+    expect(await userStart).toMatchObject({status:'running',mode})
+    expect(launches).toBe(1);expect(stops).toBe(0)
+    expect(manager.runningForWorkspace(f.root)?.status).toBe('running')
+  }finally{release();await f.close();manager.dispose()}
 })

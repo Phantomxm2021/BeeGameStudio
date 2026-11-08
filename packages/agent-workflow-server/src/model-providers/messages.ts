@@ -79,7 +79,13 @@ export function toolAlias(name: string, namespace?: string) {
   const hash = createHash('sha256').update(JSON.stringify([owner, name])).digest('hex').slice(0, 32)
   return `${readable}_${hash}`
 }
-export function normalizeNativeToolArguments(name: string, namespace: string | undefined, args: string): string {
+export function normalizeNativeToolArguments(name: string, namespace: string | undefined, args: string, schema?: Json): string {
+  // Some Responses providers omit the JSON object for parameterless calls.
+  // Normalize the argument container, not its required fields. Missing fields
+  // remain missing for the native/MCP validator to reject and report; a JSON
+  // error must not also poison the next provider request's history.
+  if (args.trim() === '' && schema?.type === 'object')
+    return '{}'
   // Providers sometimes emit an empty permission explanation without a
   // permission request. Remove only that meaningless field before native
   // validation; preserve opaque provider history and all real permissions.
@@ -98,8 +104,42 @@ export function normalizeNativeToolArguments(name: string, namespace: string | u
       // path; this adapter must not turn a tool-call parse error into a retry.
     }
   }
+  // JSON Schema treats 15000.0 as an integer, but native integer parsers
+  // reject its decimal spelling. Canonicalize safe numeric values only for
+  // native shell calls; permission fields and invalid values stay intact.
+  if (['exec_command', 'write_stdin'].includes(name) && (namespace === undefined || namespace === 'functions')) {
+    try {
+      const parsed = JSON.parse(args)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+          (name === 'exec_command' || Number.isInteger(parsed.session_id) && parsed.session_id >= -2147483648 && parsed.session_id <= 2147483647) &&
+          Object.values(parsed).every(value => typeof value !== 'number' || Number.isSafeInteger(value)))
+        args = JSON.stringify(parsed)
+    } catch { /* Preserve invalid arguments for native validation. */ }
+  }
   return args
 }
+/** Normalize only absent object containers in replayed function calls.
+ * Keep persisted history, real validation errors and opaque provider data intact. */
+export function normalizeNativeFunctionHistory(body: Json): Json {
+  if (!Array.isArray(body.input) || !body.input.some((item: Json) => item.type === 'function_call' &&
+      typeof item.arguments === 'string' && item.arguments.trim() === '')) return body
+  const objects = new Set<string>()
+  const key = (name: string, namespace?: string) => JSON.stringify([namespace ?? null, name])
+  for (const tool of body.tools ?? []) {
+    if (tool.type === 'function' && tool.parameters?.type === 'object') objects.add(key(tool.name))
+    if (tool.type === 'namespace') for (const child of tool.tools ?? [])
+      if (child.type === 'function' && child.parameters?.type === 'object') objects.add(key(child.name, tool.name))
+  }
+  let changed = false
+  const input = body.input.map((item: Json) => {
+    if (item.type !== 'function_call' || typeof item.arguments !== 'string' || item.arguments.trim() !== '' ||
+        !objects.has(key(item.name, item.namespace))) return item
+    changed = true
+    return { ...item, arguments: '{}' }
+  })
+  return changed ? { ...body, input } : body
+}
+
 export function responseToolCall(
   tool: MappedTool,
   id: string,
@@ -119,7 +159,7 @@ export function responseToolCall(
       status: 'completed',
     }
   }
-  args = normalizeNativeToolArguments(tool.name, tool.namespace, args)
+  args = normalizeNativeToolArguments(tool.name, tool.namespace, args, tool.schema)
   // Native tool handlers validate arguments and return errors to the model.
   // Rejecting ordinary JSON here would abort the entire response instead.
   return {

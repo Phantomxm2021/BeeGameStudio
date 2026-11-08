@@ -1,0 +1,27 @@
+[
+  {
+    "at": 1793438183469,
+    "type": "click",
+    "name": "Start"
+  },
+  {
+    "at": 1793438183470,
+    "type": "click",
+    "name": "Toggle middle"
+  },
+  {
+    "at": 1793438183522,
+    "type": "click",
+    "name": "Undo"
+  },
+  {
+    "at": 1793438183576,
+    "type": "click",
+    "name": "Toggle left"
+  },
+  {
+    "at": 1793438183578,
+    "type": "click",
+    "name": "Toggle right"
+  }
+]

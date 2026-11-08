@@ -1,0 +1,149 @@
+[
+  {
+    "name": "beegame-interaction-contracts",
+    "path": ".beegame/skills/bgs-game-skills/beegame-interaction-contracts/SKILL.md",
+    "description": "Implement or diagnose player-control mapping and camera-relative movement, or resolve a concrete screen/XR control-feasibility question. Listing GDD inputs alone does not require control implementation. 中文：控制实现与诊断、镜头相对移动、触控与XR输入可行性。",
+    "bytes": 3483,
+    "sha256": "3ffacd156e497465054351e7953e72c2819e0c9bd922ebccdb62bf9b494e636f"
+  },
+  {
+    "name": "bgs-imagegen",
+    "path": ".beegame/skills/bgs-game-skills/bgs-imagegen/SKILL.md",
+    "description": "Generate or edit raster assets for BGS projects, including reference boards, illustrations, sprites, textures and transparent cutouts, using available ChatGPT image generation or the configured user/platform image API. Use existing editable vector or code assets for tasks better served by those formats.",
+    "bytes": 5740,
+    "sha256": "336cbf919b5716cda6611a4fadc111592c34e89ec8b936adacefeffd337f68b8"
+  },
+  {
+    "name": "evidence-before-completion",
+    "path": ".beegame/skills/bgs-game-skills/evidence-before-completion/SKILL.md",
+    "description": "Match design, revision, fix or delivery claims to actual source versions, checks and observations. Use for completion evidence, not project planning or an automatic review stage. 中文：完成依据、原文核查、修订验证、验收证据。",
+    "bytes": 2905,
+    "sha256": "8a1828545a8e5ef3994875879d055d6c19b0efede48edad25b1a1ff76b3c0242"
+  },
+  {
+    "name": "game-art-director-expert",
+    "path": ".beegame/skills/bgs-game-skills/game-art-director-expert/SKILL.md",
+    "description": "\"Establish or repair game art direction: composition, visual style, color, lighting, materials, and VFX. Use for visual quality, not technical import or UI behavior alone. 中文：游戏美术、视觉风格、色彩、光照、特效。\"",
+    "bytes": 4006,
+    "sha256": "33111e0eea574b48a0a0272b5a68b974cd7575934969bcca43e6a5aeb2f28833"
+  },
+  {
+    "name": "game-audio-designer",
+    "path": ".beegame/skills/bgs-game-skills/game-audio-designer/SKILL.md",
+    "description": "Design or repair game music, sound effects, ambience, dialogue, spatial audio, mixing, and event feedback. 中文：游戏音效、背景音乐、配音、空间音频、混音。",
+    "bytes": 3105,
+    "sha256": "fa2978646507a0797526577e43dd67f726fd777f353935f1d57bb3cd5ba2aacb"
+  },
+  {
+    "name": "game-balance-designer-expert",
+    "path": ".beegame/skills/bgs-game-skills/game-balance-designer-expert/SKILL.md",
+    "description": "Design, diagnose, or tune combat, movement difficulty, progression, rewards, economies, and quantitative game rules. 中文：数值设计、平衡诊断、战斗数值、成长曲线、游戏经济、难度。",
+    "bytes": 2550,
+    "sha256": "102f91c740a6c1b59dae95992c89b6c493f63740fdf8439d22c12d95d9f4fd3a"
+  },
+  {
+    "name": "game-content-pipeline-engineer",
+    "path": ".beegame/skills/bgs-game-skills/game-content-pipeline-engineer/SKILL.md",
+    "description": "Author the resources/content chapter in docs/GDD.md and choose resource representations from designed actions, state changes and composition; source, import or debug assets through Scene/UI into the runtime. Use the selected art/audio direction, not a new style. 中文：资源计划、设计行为到资源制法的选择、资源获取与导入、场景解析、运行时消费。",
+    "bytes": 4100,
+    "sha256": "5754dd9ee586d5db0c09690225267a055ddf3550863f1e7d662c0655b5cde0a7"
+  },
+  {
+    "name": "game-creative-director-expert",
+    "path": ".beegame/skills/bgs-game-skills/game-creative-director-expert/SKILL.md",
+    "description": "Use for game vision, player fantasy, emotional tone, theme-mechanic alignment, narrative direction, creative cohesion or production priorities. 中文：游戏创意、玩家幻想、主题、叙事、体验定位、制作取舍。",
+    "bytes": 1843,
+    "sha256": "8a6b166fab027837243e2c9fae0fa646b591c9c14fba7f9880a1c8fba91c0452"
+  },
+  {
+    "name": "game-design-check",
+    "path": ".beegame/skills/bgs-game-skills/game-design-check/SKILL.md",
+    "description": "Review saved game-design decisions for an assigned design review or a concrete consistency, implementability or evidence question. Routine author self-check alone does not require this Skill. Not runtime acceptance. 中文：受托设计审查、具体设计矛盾与可实施性问题、定向修订核对。",
+    "bytes": 4647,
+    "sha256": "1ae1c67505de73afe7a96dadbb51d0aad09dc0a9f8f58c48a9798d9edec131f7"
+  },
+  {
+    "name": "game-feel-designer",
+    "path": ".beegame/skills/bgs-game-skills/game-feel-designer/SKILL.md",
+    "description": "Design or tune game control response, action rhythm, gameplay feedback and impact through coordinated animation, effects, camera, sound and supported haptics. Use for game feel, hit feedback and moment-to-moment responsiveness, not UI-only navigation or page transitions. 中文：操作手感、动作节奏、游玩反馈、打击感与冲击力。",
+    "bytes": 5292,
+    "sha256": "76728b674e2d19716092509c387af0ea28ab751b4c111a71ca6d95ab14ddf04c"
+  },
+  {
+    "name": "game-implementation-planning",
+    "path": ".beegame/skills/bgs-game-skills/game-implementation-planning/SKILL.md",
+    "description": "Plan an assigned implementation or architecture task, or resolve a concrete module/interface dependency. A general GDD platform choice alone does not require implementation planning. 中文：实现规划、受托技术架构、具体模块与接口依赖。",
+    "bytes": 3479,
+    "sha256": "9b019511429b0829616560b83e0e7c0445a1a7b0034b0dc4da99188a1b9e7e8a"
+  },
+  {
+    "name": "game-level-designer-expert",
+    "path": ".beegame/skills/bgs-game-skills/game-level-designer-expert/SKILL.md",
+    "description": "Design gameplay spaces, traversal, encounters, mechanic teaching and navigation; diagnose player guidance or level, round and quest progression. 中文：关卡与回合体验、玩家引导、路线与教学、空间可读性。",
+    "bytes": 3703,
+    "sha256": "7c4c732e31a6b22c8d4647550fb72b9ba9be890fe2f813b0df0147524b029293"
+  },
+  {
+    "name": "game-plan-execution",
+    "path": ".beegame/skills/bgs-game-skills/game-plan-execution/SKILL.md",
+    "description": "Execute or resume game implementation plans in the existing project, verifying basic correctness and preserving completed work. 中文：执行游戏实现计划、同工程续作、基础运行验证。",
+    "bytes": 8632,
+    "sha256": "e5b797d3e7c09a5f736c7885be9e6feaf82c848200b2422e549b6a0ff255eabf"
+  },
+  {
+    "name": "game-playtest-performance",
+    "path": ".beegame/skills/bgs-game-skills/game-playtest-performance/SKILL.md",
+    "description": "Verify gameplay behavior, diagnose interaction or performance failures, and conduct explicitly requested experience validation with evidence and focused retests. 中文：基础运行验证、交互与性能诊断、受托体验验证与证据驱动复测。",
+    "bytes": 8159,
+    "sha256": "b5a46530c35b4ed033679ad477cae7c27ea32bef30303b1d71cab9f0eb927271"
+  },
+  {
+    "name": "game-systems-designer-expert",
+    "path": ".beegame/skills/bgs-game-skills/game-systems-designer-expert/SKILL.md",
+    "description": "Design gameplay rules and core loops, or diagnose agency, repetition and learning through testable experience questions. Also covers progression, economy and state transitions when applicable. 中文：玩法系统、核心循环、选择与重复问题、可验证体验假设。",
+    "bytes": 2652,
+    "sha256": "1c772b7be19a17f3d4a1575936b9c05276f850fe30c5d805e74d85d068daa4cf"
+  },
+  {
+    "name": "game-technical-artist",
+    "path": ".beegame/skills/bgs-game-skills/game-technical-artist/SKILL.md",
+    "description": "Prepare and integrate sprite-frame animation from supplied, sourced or AI-produced artwork, or implement and repair real-time game animation, VFX, materials, shaders and camera presentation against art and feedback designs. Use for dynamic visual execution, not art direction or resource loading alone. 中文：技术美术、AI精灵图动画、动画制作、特效实现、材质着色器、镜头表现、动态视觉。",
+    "bytes": 6843,
+    "sha256": "c31acd3215844ce34b6258fd205a1c604a64663b8c5aba2d54a1c98308052521"
+  },
+  {
+    "name": "game-ui-ux-designer",
+    "path": ".beegame/skills/bgs-game-skills/game-ui-ux-designer/SKILL.md",
+    "description": "Design or repair non-XR game HUDs, menus, interface feedback and motion, navigation, gamepad focus, and input accessibility. For XR interfaces, use spatial UX. 中文：游戏界面、血条、菜单、界面切换与动效、手柄焦点、触屏布局。",
+    "bytes": 6753,
+    "sha256": "914141c83bd7c08f202d0549d8c06ef3784f000803f487ac8029f5441a3c3d9e"
+  },
+  {
+    "name": "gameplay-programmer",
+    "path": ".beegame/skills/bgs-game-skills/gameplay-programmer/SKILL.md",
+    "description": "Design gameplay execution/state interfaces, or implement and diagnose movement, collision and update timing. Use for concrete gameplay execution questions, not general GDD authoring. 中文：玩法执行设计、状态接口、运动碰撞与更新时序。",
+    "bytes": 2461,
+    "sha256": "14b36194f675ed8e73a5f7800f86312175841e1aa3386b9a75c5e882739a5c8f"
+  },
+  {
+    "name": "root-cause-debugging",
+    "path": ".beegame/skills/bgs-game-skills/root-cause-debugging/SKILL.md",
+    "description": "Systematic debugging and root-cause diagnosis for bugs, failed checks, or performance issues. 中文：故障排查、根因定位、测试失败、性能问题。",
+    "bytes": 2919,
+    "sha256": "5739fada76ead379560428f678a80d44f5758c61b0058b5a3c9557d3fce763e6"
+  },
+  {
+    "name": "spatial-computing-game-expert",
+    "path": ".beegame/skills/bgs-game-skills/spatial-computing-game-expert/SKILL.md",
+    "description": "Design or diagnose XR, AR, and MR gameplay involving body movement, room constraints, tracking, anchoring, or comfort. For interface layout alone, use spatial UX. 中文：空间计算、体感玩法、房间尺度、VR与AR游戏。",
+    "bytes": 2398,
+    "sha256": "16010ed5787ab645fb12a70022cc260ac569221008a8f233882c5bd1e019d0ac"
+  },
+  {
+    "name": "spatial-computing-ux-designer-expert",
+    "path": ".beegame/skills/bgs-game-skills/spatial-computing-ux-designer-expert/SKILL.md",
+    "description": "Design or fix XR, AR, and MR interfaces involving spatial layout, gaze, gestures, controller focus, and ergonomic legibility. For non-XR screens, use game UI/UX. 中文：空间界面、注视交互、手势、XR界面布局。",
+    "bytes": 2280,
+    "sha256": "6323543630a37fab049d31f14046625d20967c21d6cd00d068866a58f208097f"
+  }
+]

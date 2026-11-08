@@ -7,22 +7,25 @@ export const designReviewDispositionSchema = z.object({
 }).strict()
 export type DesignReviewDisposition = z.infer<typeof designReviewDispositionSchema>
 
-export function designAuthorResultSchema(findingCount = 0) {
-  const base = z.object({
+const authorSummary = z.string().trim().min(1).describe('User-facing outcome or concrete blocker in the response language')
+
+export function designAuthorResultSchema() {
+  return z.object({
     status: z.enum(['ready', 'blocked']),
-    summary: z.string().trim().min(1).describe('User-facing outcome or concrete blocker in the response language'),
+    summary: authorSummary,
+    // Retain saved author notes; only the independent reviewer resolves findings.
     reviewResponses: z.array(designReviewDispositionSchema).optional(),
   }).strict()
-  return findingCount ? z.union([
-    base.extend({ status: z.literal('ready'), reviewResponses: z.array(designReviewDispositionSchema.extend({
-      finding: z.number().int().min(1).max(findingCount),
-    })).length(findingCount) }),
-    base.extend({ status: z.literal('blocked') }),
-  ]) : base
 }
 
-export function designAuthorOutputSchema(findingCount: number) {
-  return z.toJSONSchema(designAuthorResultSchema(findingCount), { target: 'draft-7' })
+export function designAuthorOutputSchema(allowAnswer = false) {
+  // The author contract stays identical across drafts and revisions. Exact
+  // evidence-backed finding coverage belongs to the follow-up reviewer.
+  return z.toJSONSchema(z.object({
+    status: z.enum(allowAnswer ? ['ready', 'blocked', 'answered'] : ['ready', 'blocked'])
+      .describe(allowAnswer ? 'Use answered for a reply without changing or submitting the GDD; ready submits the saved design, blocked reports an unresolved dependency' : 'Ready submits the saved design; blocked reports an unresolved dependency'),
+    summary: authorSummary,
+  }).strict(), { target: 'draft-7' })
 }
 
 // The reviewer supplies evidence, not a certification of game quality.
@@ -40,7 +43,7 @@ const reportSchema = z.object({
   resolutions: z.array(designReviewDispositionSchema).optional(),
 }).strict()
 
-/** The native output contract must match the coverage checked after generation. */
+/** Final-report guidance retains the coverage checked locally after generation. */
 export function designReviewOutputSchema(findingCount: number) {
   return z.toJSONSchema(z.object({
     ...reportFields,
@@ -66,7 +69,7 @@ export const DESIGN_REVIEW_INSTRUCTIONS = [
   'Review the confirmed brief and saved GDD together for requirement preservation, compatible product rules, and a connected player flow from entry through play and outcomes to the agreed restart or recovery. Judge the current MVP or explicitly requested scope. Requirements settled in the brief need not be repeated in the GDD.',
   'Each finding requires corrective work before handoff. Report an issue once when the supplied clauses demonstrate a changed user requirement, an undetermined required player action/information/outcome, or mutually incompatible outcomes under the same applicable conditions. Cite those clauses and the concrete consequence. Read local details together with global definitions. Clarifications and suggestions without a demonstrated violation may be summarized, not turned into findings. Return an empty findings array when no violation is supported. A real contradiction remains a finding even when its clauses are author proposals; a provisional choice does not override an explicit requirement.',
   'Use the complete supplied snapshot. Check product decisions and preserve user-stated appearance and source constraints. Asset availability, sourcing, generation, atlas preparation, registration and runtime checks belong to production, not this review. Stay read-only; source identity is checked by BGS. Use read-only tools only for a necessary calculation or evidence absent from the snapshot. Do not load Skills, browse, delegate, read histories or unrelated files, or write. Implementation tuning and hypothetical bad implementations are outside this document review.',
-  'Return one JSON object matching this turn’s output schema, with concise user-language conclusions in summary and source-supported corrective issues in findings.',
+  'At completion, return one JSON object matching the supplied final JSON contract, with concise user-language conclusions in summary and source-supported corrective issues in findings.',
 ].join('\n\n')
 
 export function assertDesignReviewCoverage(dispositions: readonly DesignReviewDisposition[], findingCount: number, kind = 'GDD') {
@@ -104,7 +107,6 @@ export function assertDesignReviewReady(source: { path: string; sha256: string }
 export function designReviewProgress(reviews: readonly DesignReviewReceipt[]) {
   let findings: DesignReviewReport['findings'] = [], bestCount = Infinity, stalled = 0
   for (const [index, receipt] of reviews.entries()) {
-    assertDesignReviewCoverage(receipt.authorResponses ?? [], findings.length, 'GDD author round ' + (index + 1))
     assertDesignReviewCoverage(receipt.report.resolutions ?? [], findings.length, 'GDD reviewer round ' + (index + 1))
     findings = pendingDesignReviewFindings(receipt.report, findings)
     if (findings.length) {

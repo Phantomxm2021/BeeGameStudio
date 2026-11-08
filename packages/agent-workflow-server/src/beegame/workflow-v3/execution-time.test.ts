@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { projectExecutionTime } from './execution-time'
 import type { AgentTurn, Run } from './state'
+import { runtimeRunState } from './store'
 
 const now = Date.now()
 const at = (minutes: number) => new Date(now + minutes * 60_000).toISOString()
@@ -52,11 +53,13 @@ test('runtime-state exposes the persisted project total through the existing end
     chatSessionId: 'chat', requestKey: 'create', text: 'Offline fixture', constraints: {}, ids: ['goal'] })
   value.agentTurns = [turn('first', -60, -50), turn('second', -20, -15)]
   value.paused = { at: at(-15) }
-  let saved: Run | undefined = value, starts = 0, commits = 0
+  let saved: Run | undefined = value, starts = 0, commits = 0, reads = 0, projections = 0
   const before = JSON.stringify(value), cleanups: Array<() => void | Promise<void>> = []
   const app = createAgentWorkflowApp({ dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projects,
     currentUser: { id: 'owner', role: 'owner' }, modelConfigStore: false, skillsConfig: false,
-    workflowV3Store: { async read() { return saved }, async commit() { commits++; throw Error('Read only') } },
+    workflowV3Store: { async read() { reads++; return saved },
+      async readRuntimeState() { projections++; return saved ? runtimeRunState(saved) : undefined },
+      async commit() { commits++; throw Error('Read only') } },
     sessionRunner: { async start() { starts++; throw Error('No model calls') } },
     registerCleanup: cleanup => cleanups.push(cleanup),
   })
@@ -64,11 +67,13 @@ test('runtime-state exposes the persisted project total through the existing end
     const created = await app.request('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id: 'fixture', name: 'Fixture', root_path: workspace, created_at: Date.now() - 86_400_000 }) })
     expect(created.status).toBe(200)
+    reads = 0
     const response = await app.request('/api/projects/fixture/runtime-state')
     expect(response.status).toBe(200)
     expect((await response.json()).execution_time).toEqual({ elapsed_ms: 15 * 60_000, running: false })
     saved = undefined
     expect((await (await app.request('/api/projects/fixture/runtime-state')).json()).execution_time).toBeNull()
+    expect({reads,projections}).toEqual({reads:0,projections:2})
     expect(JSON.stringify(value)).toBe(before)
     expect({ starts, commits }).toEqual({ starts: 0, commits: 0 })
   } finally {

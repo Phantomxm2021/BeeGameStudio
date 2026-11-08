@@ -2,7 +2,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { createHash } from 'node:crypto'
-import { PROJECT_DOCUMENTS } from './project-content-authority'
+import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 
 // The shared authority currently contains one design source. Content links
 // owned by that source are retained inputs, not merely planned output paths.

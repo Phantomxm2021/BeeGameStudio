@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -6,7 +7,8 @@ import { createBgsRunner } from './runner'
 // Actual CLI and loopback-only scripted responses; no model or game project.
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 localTest('native tool output keeps bounded references intact on start and resume', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-output-budget-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-output-budget-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
   const samples = [
@@ -57,7 +59,7 @@ localTest('native tool output keeps bounded references intact on start and resum
     for (round = 0; round < 2; round++) {
       runtime = await runner.start({ sessionId: 'output-budget-fixture', cwd: game,
         ...(round ? { resumeSessionId: nativeSessionId } : {}),
-        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'unknown-fixture-model' },
         onNativeSessionId: id => { nativeSessionId = id }, requestPermission: async () => ({ behavior: 'deny' }),
       })

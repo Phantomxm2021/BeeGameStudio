@@ -18,7 +18,7 @@ const params = new Set(['response_format', 'response_format.type', 'response_for
 
 type ProviderErrorIdentifiers = { type?: string; code?: string; param?: string }
 type BodyStatus = 'pending' | 'parsed' | 'empty' | 'invalid' | 'too-large' | 'incomplete'
-type ErrorDiagnostics = ProviderErrorIdentifiers & {
+export type ProviderHttpErrorDiagnostics = ProviderErrorIdentifiers & {
   bodyStatus: BodyStatus
   requestId?: string
   retryAfter?: number | string
@@ -39,8 +39,9 @@ function secondsOrDate(value: string): number | string | undefined {
 
 /** Bounded observer shared by converted errors and byte-transparent Responses. */
 export function observeProviderHttpError(response: Response) {
-  const details: ErrorDiagnostics = { bodyStatus: 'pending' }
+  const details: ProviderHttpErrorDiagnostics = { bodyStatus: 'pending' }
   details.requestId = requestId(response.headers.get('x-request-id')) ?? requestId(response.headers.get('request-id'))
+    ?? requestId(response.headers.get('x-opencode-log-id'))
   const retryAfter = response.headers.get('retry-after')
   if (retryAfter !== null) details.retryAfter = secondsOrDate(retryAfter)
   for (const resource of ['requests', 'tokens']) {
@@ -108,7 +109,7 @@ export function observeProviderHttpError(response: Response) {
 
 export class ProviderHttpError extends Error {
   constructor(readonly status: number, readonly identifiers: Readonly<ProviderErrorIdentifiers>,
-    readonly diagnostics: Readonly<ErrorDiagnostics>) {
+    readonly diagnostics: Readonly<ProviderHttpErrorDiagnostics>) {
     const details = Object.entries(identifiers).map(([key, value]) => `${key}=${value}`)
     super(`The selected model provider request failed (HTTP ${status}${details.length ? '; ' + details.join('; ') : ''})`)
     this.name = 'ProviderHttpError'

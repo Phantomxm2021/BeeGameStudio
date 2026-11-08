@@ -9,6 +9,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import {startProviderBridge,type ProviderNetworkOptions} from '../model-providers/bridge'
 import { BgsClient, BgsClientError, type RpcObject } from './client'
 import type { DynamicToolSpec } from './native-protocol'
+import { object, boolean } from 'zod/v4'
 import { bgsApproval, elicitationAnswer, webSearchTool } from './interactions'
 import { bgsReasoningConfig } from './preferences'
 import { configureBgsSkills } from './skills'
@@ -17,34 +18,21 @@ import type { BeeGameSessionRunner, BeeGameSessionRunnerStartInput, BeeGameSessi
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
 import { projectExecutionAccess } from '../beegame/project-execution-access'
 import { prepareNativeMcpConfig } from '../beegame/native-mcp-config'
+import type { McpHttpNetworkOptions } from '../beegame/native-mcp-http'
 import { closeSessionTestBrowsers } from '../beegame/native-test-browser-cleanup'
 import { responseLanguageInstruction } from '../beegame/response-language'
-import { BEEGAME_USER_RESPONSE_SCOPE } from '../beegame/user-response-scope'
+import { BEEGAME_USER_RESPONSE_SCOPE, BEEGAME_USER_COMPLETION_FORMAT } from '../beegame/user-response-scope'
 import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/store'
-import { DESIGN_REVIEW_INSTRUCTIONS, designReviewOutputSchema, designAuthorOutputSchema, designReviewProgress, assertDesignReviewCoverage, parseDesignReview, type DesignReviewReport, type DesignReviewReceipt } from '../beegame/workflow-v3/design-review'
+import { DESIGN_REVIEW_INSTRUCTIONS, designReviewOutputSchema, designReviewProgress, parseDesignReview, type DesignReviewReport, type DesignReviewReceipt } from '../beegame/workflow-v3/design-review'
 
-const protectedWriteTools: DynamicToolSpec[] = ['WriteProjectFile', 'EditProjectFile'].map(name => ({ type: 'function', name,
-  description: name === 'WriteProjectFile'
-    ? 'Write a BGS protected design record or AGENTS.md through the host permission authority. Ordinary project files use exec_command with project-local file operations.'
-    : 'Edit a BGS protected design record or AGENTS.md through host permission. Use old_string/new_string for one replacement, or edits for multiple non-overlapping replacements against the same original file. All must match uniquely; one failure saves nothing.',
-  inputSchema: { type: 'object', properties: { file_path: { type: 'string' },
-    ...(name === 'WriteProjectFile' ? { content: { type: 'string' } }
-      : { old_string: { type: 'string' }, new_string: { type: 'string' }, edits: { type: 'array', minItems: 1,
-        items: { type: 'object', properties: { old_string: { type: 'string', minLength: 1 }, new_string: { type: 'string' } },
-          required: ['old_string', 'new_string'], additionalProperties: false } } }) },
-    required: name === 'WriteProjectFile' ? ['file_path', 'content'] : ['file_path'],
-    ...(name === 'EditProjectFile' ? { oneOf: [{ required: ['old_string', 'new_string'] }, { required: ['edits'] }] } : {}),
-    additionalProperties: false },
-}))
-
-protectedWriteTools.push({ type: 'function', name: 'AskUserQuestion', description: 'Ask the user for missing information or an explicit decision through BGS. Preserve their actual answers.',
+const userQuestionTool: DynamicToolSpec = { type: 'function', name: 'AskUserQuestion', description: 'Ask the user for missing information or an explicit decision through BGS. Preserve their actual answers.',
   inputSchema: { type: 'object', properties: { questions: { type: 'array', minItems: 1, maxItems: 3,
     items: { type: 'object', properties: { question: { type: 'string' }, header: { type: 'string' },
       options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label','description'], additionalProperties: false } },
-      multiSelect: { type: 'boolean' } }, required: ['question','header','options'], additionalProperties: false } } }, required: ['questions'], additionalProperties: false } })
+      multiSelect: { type: 'boolean' } }, required: ['question','header','options'], additionalProperties: false } } }, required: ['questions'], additionalProperties: false } }
 
 const workflowTool: DynamicToolSpec = { type: 'function', name: 'BgsWorkflow',
-  description: 'Use preview with operation start/status to open or inspect the current project development server; reuse its returned local URL. If reloadAfterEdits is true, reload the page after source changes. This operation does not run tests or end the task. New task-owned servers close with the task; existing user previews remain user-owned. Read the current BGS assignment (status), hand off preparatory work when the current task uses a tool handoff (advance), or request visual, resources, or implementation work (visual/resources/implement) within the current user scope. For handoffs provide a summary, exact existing GDD headings in sections, and actual project-relative files. Follow the current assignment. GDD and visual-design results use the current final JSON contract, not advance. Implement within an already active implementation stage optionally records the current user work in place: continue and finish in this turn. No implementation handoff or delivery submission is required for normal completion. Use select-visual in implementation or resource tasks with the same summary/sections/files fields to retain actual selected reference images without ending the task or registering them as production assets. Existing selections retain their hashes; use an explicit user change to replace the agreed target. Other successful handoffs end this native turn; BGS checks source identity after cleanup and continues within the requested scope. Follow the returned instruction. Handoffs record author-declared readiness; source selection records reference bytes. Neither certifies quality.',
+  description: 'Inspect the current BGS assignment with status. Use preview start/status for its managed runtime URL. Other workflow actions follow the current assignment and user authorization; they record business state, not a quality verdict.',
   inputSchema: { type: 'object', properties: {
     action: { type: 'string', enum: ['status', 'advance', 'visual', 'resources', 'implement', 'select-visual', 'preview'] }, operation: { type: 'string', enum: ['start', 'status'] }, summary: { type: 'string' },
     sections: { type: 'array', items: { type: 'string' } }, files: { type: 'array', items: { type: 'string' } },
@@ -193,7 +181,7 @@ export function nativeSkillReadTargets(actions: unknown, skills: RpcObject[]): A
   return [...reads.values()]
 }
 
-export function createBgsRunner(options: ProviderNetworkOptions & { command?: readonly string[] } = {}): BeeGameSessionRunner {
+export function createBgsRunner(options: ProviderNetworkOptions & McpHttpNetworkOptions & { command?: readonly string[] } = {}): BeeGameSessionRunner {
   return { start: input => BgsRuntime.start(input, options) }
 }
 
@@ -269,24 +257,31 @@ export async function readNativeCommandExits(path: string, threadId: string, cal
   } finally { lines.close(); stream.destroy() }
 }
 
+function finalJsonContext(schema: Record<string, unknown>): string {
+  return 'When the current task is finished, return exactly one JSON object matching the final schema below, without Markdown fences, a preface or trailing prose. This format applies only to the final answer; use tools and progress messages normally while carrying out the task. BGS parses the final JSON and validates the saved sources before accepting it.\nFinal JSON schema:\n' + JSON.stringify(schema)
+}
+
 // A resumed native history retains earlier developer instructions. Keep all
 // task-varying authority in the existing current-context frame so a completed
 // preparation contract cannot outlive its task. The baseline copy preserves
 // the same current contract across compaction.
 function currentRuntimeContext(systemContext: string | undefined, finalOutput: BeeGameSessionSubmitInput['finalOutput'],
   access: Awaited<ReturnType<typeof projectExecutionAccess>>,
-  findings = designReviewProgress(finalOutput?.designReview?.previousReviews ?? []).findings) {
+  findings = designReviewProgress(finalOutput?.designReview?.previousReviews ?? []).findings, assignmentInstructions?: string) {
   return [
     'The current BGS task scope, file access and final-result contract replace the corresponding instructions of earlier tasks. bgsConfirmedBrief records user requirements and subsequent requests. Later explicit user requests can change the task scope; an earlier per-task stopping point does not permanently restrict future requests. Preserve unrelated requirements and the current platform/engine restrictions.',
     finalOutput?.readOnly ? (finalOutput.writeDocument
-      ? 'Shell cannot modify project files. The current parent may maintain only ' + finalOutput.writeDocument.path + ' with WriteProjectFile/EditProjectFile through current task authority. This working document may remain after interruption; final readiness is a separate source-bound handoff. Return the fields in the current final-result contract, not the document body.'
-      : 'Project files are read-only for this document task.') : 'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
-      '. Shell cannot modify these protected paths. For ordinary project files, use exec_command with project-local file operations. Only use apply_patch if it is listed as an available tool; do not assume a shell executable exists. Preserve the current user requirements and authorization when updating design records.',
+      ? 'Use native file tools to maintain documents under docs/; the rest of this project is read-only for this assignment. Save ' + finalOutput.writeDocument.path + ' before final handoff.'
+      : 'Project files are read-only for this task.')
+      : 'Use native file tools for project source and docs/. ' + (finalOutput?.writeDocument
+        ? finalOutput.writeDocument.path + ' is writable as the design record of this author task. '
+        : '') + 'Other confirmed design records, BGS control files, credentials and the resource registry remain protected by the supplied filesystem permissions.',
+    assignmentInstructions,
     systemContext,
     process.platform === 'darwin' && !finalOutput?.readOnly
       ? 'Native macOS filesystem notifications are unavailable in this sandbox; development watchers using an explicit polling option remain usable.' : undefined,
-    finalOutput ? 'For this task, end with one JSON object matching the schema below, without Markdown fences or surrounding prose. BGS validates the final result locally before accepting it.\n' +
-      JSON.stringify(finalOutput.designReview && findings.length ? designAuthorOutputSchema(findings.length) : finalOutput.schema) : 'No preparation JSON result is required for this task. Follow the response and delivery requirements of the current request.',
+    finalOutput ? finalJsonContext(finalOutput.schema)
+      : BEEGAME_USER_COMPLETION_FORMAT + '\nNo preparation JSON result is required for this task. Follow the response and delivery requirements of the current request.',
     finalOutput?.designReview && findings.length ? 'Current GDD revision findings (1-based indices): ' +
       JSON.stringify(findings.map((finding, index) => ({ finding: index + 1, ...finding }))) : undefined,
   ].filter(Boolean).join('\n\n')
@@ -347,7 +342,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
   private deferredResume = false
   private shared?: RpcObject
   private nativeGoal?: BeeGameNativeGoalInput
-  private active?: { contextToRecord?: BeeGameNativeContext; input: BeeGameSessionSubmitInput; turnId?: string; error?: RpcObject; nativeGoal?: BeeGameNativeGoalInput; goalArmed?: boolean; nativeSubmitted?: boolean; nativeGoalStatus?: string; nativeTurnStarted?: boolean; nativeTurnCompleted?: boolean; nativeLastTurnId?: string; finalOutputText?: string; finalOutputId?: string; pendingProgress?: { id: string; text: string }; resolve(): void; reject(error: Error): void }
+  private active?: { contextToRecord?: BeeGameNativeContext; input: BeeGameSessionSubmitInput; turnId?: string; error?: RpcObject; nativeGoal?: BeeGameNativeGoalInput; goalArmed?: boolean; nativeSubmitted?: boolean; nativeGoalStatus?: string; nativeTurnStarted?: boolean; nativeTurnCompleted?: boolean; nativeLastTurnId?: string; finalOutputText?: string; finalOutputId?: string; pendingProgress?: { id: string; text: string }; handoffClosing?: boolean; handoffInterrupt?: boolean; resolve(): void; reject(error: Error): void }
   private stopped = false
   private messages = new Map<string, string>()
   private streamedProgress = new Set<string>()
@@ -368,28 +363,27 @@ class BgsRuntime implements BeeGameSessionRuntime {
   private constructor(private input: BeeGameSessionRunnerStartInput,
     private access: Awaited<ReturnType<typeof projectExecutionAccess>>) {}
 
-  static async start(input: BeeGameSessionRunnerStartInput, options:ProviderNetworkOptions & {command?:readonly string[]}) {
+  static async start(input: BeeGameSessionRunnerStartInput, options:ProviderNetworkOptions & McpHttpNetworkOptions & {command?:readonly string[]}) {
     if (!input.env.BEEGAME_CONFIG_DIR) throw Error('An owner-scoped BGS configuration directory is required')
-    if (input.finalOutput?.designReview &&
-        (!input.finalOutput.readOnly || !input.confirmedBriefContext))
-      throw Error('Independent GDD review requires read-only project access and confirmed requirements')
+    if (input.finalOutput?.designReview && !input.confirmedBriefContext)
+      throw Error('Independent GDD review requires confirmed requirements')
     if (input.nativeGoal?.mode === 'resume' && !input.resumeSessionId)
       throw Error('BGS native Goal resume requires a saved native session')
     const access = await projectExecutionAccess({ workspacePath: input.cwd, sessionId: input.sessionId,
-      environment: input.env, readOnly: input.finalOutput?.readOnly })
+      environment: input.env, readOnly: input.finalOutput?.readOnly, documentPath: input.finalOutput?.writeDocument?.path })
     const runtime = new BgsRuntime(input, access)
     const home = resolve(bgsHomeDirectory(input.env.BEEGAME_CONFIG_DIR, input.env.BGS_HOME))
     const env: Record<string,string> = { ...getSafeRuntimeProcessEnvironment(), ...input.env, ...access.environment, BGS_HOME: home }
     try {
       await mkdir(home, { recursive: true, mode: 0o700 })
       const builtinSkills = await realpath(getBuiltinSkillsDirectory(input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR || undefined))
-      const mcp = await prepareNativeMcpConfig(env, input.cwd, input.uiLayoutConstraints, input.sessionId, options, access.projectReadToolPath ?? null, input.imageGenerationEntry)
+      const mcp = await prepareNativeMcpConfig(env, input.cwd, input.sessionId, options, input.imageGenerationEntry)
       runtime.mcpClose = mcp.close
       delete env.BEEGAME_NATIVE_MCP_SERVERS_JSON
-      const userSkills = join(input.env.BEEGAME_CONFIG_DIR, 'skills')
+      const historicalUserSkills = join(input.env.BEEGAME_CONFIG_DIR, 'skills')
       const profile = access.config.permissions['bgs-project'].filesystem
       profile[builtinSkills] = 'read'
-      profile[userSkills] = 'read'
+      profile[historicalUserSkills] = 'read' // Saved absolute reads; no longer a discovery root.
       profile[join(home, 'skills')] = 'read'
       const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language),
         mcp.context,
@@ -422,12 +416,28 @@ class BgsRuntime implements BeeGameSessionRuntime {
         onExit: error => {
           const active = runtime.active
           runtime.pendingDesignReview?.reject(error)
-          active?.reject(error)
+          active?.reject(active.input.signal.aborted ? Error('BGS turn interrupted') : error)
         },
       })
-      await configureBgsSkills(runtime.client, home, builtinSkills, userSkills)
-      const shared = { config: { ...mcp.config, ...await bgsReasoningConfig(input.env, runtime.client) }, cwd: access.root, permissions: 'bgs-project', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review',
-        developerInstructions: instructions, ...(env.BEEGAME_MODEL ? { model: env.BEEGAME_MODEL } : {}) }
+      const { configuration, readRoots } = await configureBgsSkills(runtime.client, home, builtinSkills)
+      for (const root of readRoots) profile[root] = 'read'
+      // The public config summary omits the experimental tool setting. Read the
+      // existing layers (high to low) to honor explicit user/project opt-outs.
+      const {config: userConfig,layers} = configuration
+      const questionSettings=object({
+        tools:object({experimental_request_user_input:object({enabled:boolean().optional()}).optional()}).nullable().optional(),
+        features:object({default_mode_request_user_input:boolean().optional()}).nullable().optional(),
+      })
+      let toolEnabled=true
+      for(const layer of [...layers??[]].reverse()) if(!layer.disabledReason) {
+        const setting=questionSettings.parse(layer.config)
+        toolEnabled=setting.tools?.experimental_request_user_input?.enabled??toolEnabled
+      }
+      const nativeQuestions=toolEnabled && questionSettings.parse(userConfig).features?.default_mode_request_user_input!==false
+      const shared = { config: { ...mcp.config, permissions: access.config.permissions, ...await bgsReasoningConfig(input.env, runtime.client),
+        ...(nativeQuestions ? {'features.default_mode_request_user_input': true} : {}) }, cwd: access.root, permissions: 'bgs-project', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review',
+        developerInstructions: instructions,
+        ...(env.BEEGAME_MODEL ? { model: env.BEEGAME_MODEL } : {}) }
       runtime.nativeGoal = input.nativeGoal
       runtime.shared = shared
       // Use native history hydration to receive restored usage on cold resume.
@@ -437,11 +447,15 @@ class BgsRuntime implements BeeGameSessionRuntime {
       // immediately launch its idle continuation. Defer that resume until
       // submit() has paused the old Goal and can inject the current assignment.
       runtime.deferredResume = Boolean(input.nativeGoal && input.resumeSessionId)
+      // Assignment roles supplement the native coding contract; they must not
+      // replace the model's base instructions or become a persisted custom base.
       shared.developerInstructions = [instructions, ...Object.entries({
-        ...bgsApplicationContext('bgsRuntime', currentRuntimeContext(input.systemContext, input.finalOutput, access)),
+        ...bgsApplicationContext('bgsRuntime', currentRuntimeContext(input.systemContext, input.finalOutput, access, undefined, input.baseInstructions)),
         ...bgsApplicationContext('bgsConfirmedBrief', input.confirmedBriefContext),
       }).map(([key, { value }]) => `<${key}>${value}</${key}>`)].filter(Boolean).join('\n\n')
-      const startAuthor = () => runtime.client.request('thread/start', { ...shared, dynamicTools: [...protectedWriteTools, ...(input.workflow ? [workflowTool] : [])] })
+      const startAuthor = () => runtime.client.request('thread/start', { ...shared, dynamicTools: [
+        ...(!nativeQuestions ? [userQuestionTool] : []), ...(input.workflow ? [{...workflowTool, description: input.workflowDescription ?? workflowTool.description}] : []),
+      ] })
       let result
       try { result = runtime.deferredResume
         ? { thread: { id: input.resumeSessionId } }
@@ -544,6 +558,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
     if (input.confirmedBriefContext !== this.input.confirmedBriefContext)
       throw Error('Confirmed requirements changed after BGS runtime preparation; prepare a current runtime before submitting')
     input.signal.throwIfAborted()
+    await input.finalOutput?.writeDocument?.authorize()
+    input.signal.throwIfAborted()
     const recovery = !this.restartedImplementation && (input.nativeRecovery ?? this.input.nativeRecovery)
     if (recovery && !this.input.resumeSessionId) throw Error('BGS native recovery requires a saved native session')
     const assignment = input.nativeGoal ?? this.input.nativeGoal
@@ -573,18 +589,11 @@ class BgsRuntime implements BeeGameSessionRuntime {
         const prompt: RpcObject[] = recovery ? [] : typeof effectivePrompt === 'string' ? [{ type: 'text', text: effectivePrompt }]
           : effectivePrompt.map(block => block.type === 'text' ? block : { type: 'image',
             url: `data:${block.source.media_type};base64,${block.source.data}` })
-        const text = prompt.findLast(block => block.type === 'text')?.text
-        const name = typeof text === 'string' ? /^\$([A-Za-z0-9_-]+)\b/.exec(text)?.[1] : undefined
-        if (name) {
-          const skill = this.skills.find(skill => skill.name === name && skill.enabled && typeof skill.path === 'string')
-          if (!skill) { reject(Error('Required BGS skill is unavailable: ' + name)); return }
-          prompt.unshift({type:'skill',name,path:skill.path})
-        }
         // Resume does not replace old model history. Refresh it once through
         // the existing slot; the current thread instructions above survive
         // later compaction. New threads already contain these facts once.
-        // The JSON contract is guidance; only the host enforces acceptance.
-        const systemContext = currentRuntimeContext(this.input.systemContext, input.finalOutput, this.access, this.designReviewer?.findings)
+        // The final JSON contract guides completion, not every tool-work request.
+        const systemContext = currentRuntimeContext(this.input.systemContext, input.finalOutput, this.access, this.designReviewer?.findings, this.input.baseInstructions)
         const fingerprint = { threadId: this.threadId,
           runtimeSha256: createHash('sha256').update(systemContext).digest('hex'),
           briefSha256: createHash('sha256').update(input.confirmedBriefContext ?? '').digest('hex') }
@@ -613,7 +622,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
           turn.nativeGoalStatus = typeof result.goal.status === 'string' ? result.goal.status : undefined
         }
         void (async () => {
-          if (this.restartedImplementation) await this.emit('system.status', 'Native execution never started; continuing implementation from the retained reviewed GDD.', { subtype: 'runtime_notice' })
+          if (this.restartedImplementation) await this.emit('system.status', 'Native execution never started; continuing the retained authorized assignment in a new native session.', { subtype: 'runtime_notice' })
           // MCP startup can finish before submit installs the Chat callback.
           for (const notice of this.mcpStartupFailures.values()) {
             if (!notice.threadId || notice.threadId === this.threadId)
@@ -682,8 +691,29 @@ class BgsRuntime implements BeeGameSessionRuntime {
     }
   }
 
-  /** Preparation cannot hand off while its native tool work is unfinished. */
-  private async assertHandoffToolsSettled() {
+  /** A source-bound host handoff ends author work after the tool reply is saved.
+   * Run outside the notification queue so terminal events can still be consumed. */
+  private async closeImplementationHandoff(turn: NonNullable<BgsRuntime['active']>) {
+    if(this.active!==turn || turn.handoffClosing || turn.nativeTurnCompleted ||
+        !turn.input.implementationHandoff?.() || turn.input.signal.aborted) return
+    turn.handoffClosing=true
+    try {
+      await this.client.drainNotifications()
+      // Wait for tool replies and child work; clean owned terminals through
+      // the same native cleanup used for ordinary completion.
+      if(this.liveChildren.size || [...this.items.values()].some(item=>item.type!=='commandExecution')) return
+      await this.client.request('thread/backgroundTerminals/clean',{threadId:this.threadId},5000)
+      await this.reconcileCommandEnds()
+      if(this.items.size || this.liveChildren.size || this.active!==turn || turn.nativeTurnCompleted) return
+      turn.input.signal.throwIfAborted()
+      turn.handoffInterrupt=true
+      await this.client.request('turn/interrupt',{threadId:this.threadId,turnId:turn.turnId})
+    } catch(error) {
+      if(this.active===turn && !turn.nativeTurnCompleted) turn.reject(error instanceof Error?error:Error(String(error)))
+    } finally {turn.handoffClosing=false}
+  }
+
+  private async reconcileCommandEnds() {
     await this.client.drainNotifications()
     if (!this.items.size) return
     // Approved commands can fail before native process creation and therefore
@@ -705,8 +735,12 @@ class BgsRuntime implements BeeGameSessionRuntime {
       }
       await this.client.drainNotifications()
     }
-    if (!this.items.size) return
-    throw Error('BGS ended the task with unfinished tools')
+  }
+
+  /** Handoffs require real tool ends, including durable pre-spawn failures. */
+  private async assertHandoffToolsSettled() {
+    await this.reconcileCommandEnds()
+    if (this.items.size) throw Error('BGS ended the task with unfinished tools')
   }
 
   private async completePreparedTurn(turn: NonNullable<BgsRuntime['active']>) {
@@ -747,7 +781,6 @@ class BgsRuntime implements BeeGameSessionRuntime {
     const text = bytes.toString('utf8')
     const startedAt = new Date().toISOString()
     const responses = candidate.reviewResponses ?? []
-    assertDesignReviewCoverage(responses, this.designReviewer?.findings.length ?? 0, 'GDD author round ' + ((this.designReviewer?.rounds ?? 0) + 1))
     const completed = this.designReviews.at(-1)
     if (completed && !this.designReviewer!.findings.length && completed.source.path === source.path && completed.source.sha256 === source.sha256) {
       const summary = await contract.accept(value)
@@ -767,6 +800,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         'features.goals': false, 'features.multi_agent': false, 'features.multi_agent_v2': false,
         project_doc_max_bytes: 0,
         'features.image_generation': false, 'features.view_image': false,
+        'features.default_mode_request_user_input': false,
         // Filter after inherited explicit assignments; replacing set would merge helper paths.
         shell_environment_policy: { include_only: Object.keys({ ...getSafeRuntimeProcessEnvironment(), ...this.access.reviewEnvironment }) },
         // The saved candidate and review contract replace project work guidance.
@@ -788,7 +822,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
     const authorResponses = followup ? responses : undefined
     const response = followup ? candidate.summary : undefined
     const prompt = [followup
-      ? 'Targeted follow-up only. Verify each current numbered finding and author response against the current saved definitions and affected uses; either diagnosis may be wrong. Return exactly one evidence-backed resolution per finding: corrected, rejected (disproven), or unresolved. Keep unresolved findings in resolutions, not findings; findings contains only new defects, including those introduced by edits. Do not restart a broad audit or add unrelated improvements. Current findings (1-based indices): ' + JSON.stringify(reviewer.findings.map((finding, index) => ({ finding: index + 1, ...finding }))) + '. Author responses: ' + JSON.stringify(authorResponses)
+      ? 'Targeted follow-up only. Verify each current numbered finding against the current saved definitions and affected uses, considering the author revision summary as a claim; either diagnosis may be wrong. Return exactly one evidence-backed resolution per finding: corrected, rejected (disproven), or unresolved. Keep unresolved findings in resolutions, not findings; findings contains only new defects, including those introduced by edits. Do not restart a broad audit or add unrelated improvements. Current findings (1-based indices): ' + JSON.stringify(reviewer.findings.map((finding, index) => ({ finding: index + 1, ...finding }))) + '. Author revision summary: ' + JSON.stringify(response) + (authorResponses?.length ? '. Saved author notes (claims, not resolutions): ' + JSON.stringify(authorResponses) : '')
       : 'Initial review of the supplied saved GDD under the review contract. Return the supported conclusions and findings; omit resolutions.',
       'Confirmed project brief (user requirements and host defaults):\n' + turn.input.confirmedBriefContext,
       'Current saved source: ' + JSON.stringify(source),
@@ -837,7 +871,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         turn.finalOutputText = undefined; turn.finalOutputId = undefined; turn.pendingProgress = undefined; turn.turnId = undefined
         const resumed = await this.client.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text:
           'Verify this current numbered revision list before editing under the existing author revision contract; these are claims, not authoritative corrections. Where the saved definitions already satisfy the requirement or the cited definitions are compatible under their stated conditions, reject the finding with those supporting clauses. Correct a demonstrated defect by making the affected definitions consistent: preserve explicit user requirements and selected designs; revise or withdraw an unconfirmed author proposal when that resolves the conflict. Inspect only the implicated definitions and affected uses; batch related edits and reuse saved evidence. Return the required ready/blocked result under the current GDD revision contract.' }],
-          additionalContext: bgsApplicationContext('bgsRuntime', currentRuntimeContext(this.input.systemContext, contract, this.access, pending)) })
+          additionalContext: bgsApplicationContext('bgsRuntime', currentRuntimeContext(this.input.systemContext, contract, this.access, pending, this.input.baseInstructions)) })
         if (typeof resumed.turn?.id !== 'string') throw Error('BGS did not acknowledge the GDD revision turn')
         if (this.active === turn) turn.turnId = resumed.turn.id
         return
@@ -955,6 +989,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       if (!turn.nativeGoal) {
         turn.turnId = nativeTurnId
         turn.nativeTurnCompleted = false
+        void this.closeImplementationHandoff(turn)
       }
       if (turn.nativeGoal && nativeTurnId) {
         if (turn.nativeLastTurnId === nativeTurnId && turn.turnId !== nativeTurnId) return
@@ -1033,16 +1068,19 @@ class BgsRuntime implements BeeGameSessionRuntime {
         this.input.onNativeContext?.(turn.contextToRecord)
         delete turn.contextToRecord
       }
+      if (!complete && p.threadId === this.designReviewer?.threadId && this.pendingDesignReview &&
+          trackedNativeToolTypes.has(item.type)) this.pendingDesignReview.text = undefined
       if (!complete && turn.input.finalOutput && p.threadId === this.threadId &&
           (trackedNativeToolTypes.has(item.type) || item.type === 'collabAgentToolCall')) {
         // Responses providers may omit phase. A following tool proves this was
         // progress; keep JSON candidates private even when more work follows.
         const progress = turn.pendingProgress
         turn.pendingProgress = undefined
-        if (progress && !/^\s*(?:[\[{]|```)/.test(progress.text)) {
-          turn.finalOutputText = undefined; turn.finalOutputId = undefined
+        // Any following tool invalidates the earlier completion candidate.
+        // Only non-JSON progress is public; an interim JSON object stays private.
+        turn.finalOutputText = undefined; turn.finalOutputId = undefined
+        if (progress && !/^\s*(?:[\[{]|```)/.test(progress.text))
           await this.emit('assistant.message', progress.text, identity(progress.id))
-        }
       }
       const prior = this.items.get(item.id)
       if ((trackedNativeToolTypes.has(item.type) || item.type === 'agentMessage') && !complete) this.items.set(item.id, { ...item, bgsThreadId: p.threadId, bgsTurnId: notificationTurnId, bgsStartedAt:new Date().toISOString() })
@@ -1154,6 +1192,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
           ...tool, ...(owner ? { parentToolUseID: owner } : {}), is_error: failed })
 
       }
+      if(complete && (trackedNativeToolTypes.has(item.type) || item.type==='collabAgentToolCall' || item.type==='agentMessage') && p.threadId===this.threadId)
+        void this.closeImplementationHandoff(turn)
     } else if (method === 'item/mcpToolCall/progress') {
       const item = this.items.get(p.itemId)
       if (item?.type !== 'mcpToolCall') return
@@ -1218,12 +1258,22 @@ class BgsRuntime implements BeeGameSessionRuntime {
         else if (!pending.text || !endedId) pending.reject(Error('Independent GDD review ended without a report or turn identity'))
         else pending.resolve({ text: pending.text, turnId: endedId })
       }
+      void this.closeImplementationHandoff(turn)
     } else if (method === 'turn/completed' && p.threadId === this.threadId) {
       // turn/start's RPC response can arrive before its started notification.
       // Track the ended ID separately so a newly acknowledged revision is admitted.
       turn.nativeLastTurnId = notificationTurnId ?? turn.turnId
       turn.nativeTurnCompleted = true
       if (this.liveChildren.size) turn.reject(Error('BGS ended the parent turn with unfinished child work'))
+      else if((p.turn?.status==='completed' || p.turn?.status==='interrupted' && turn.handoffInterrupt) && turn.input.implementationHandoff?.() && !turn.input.signal.aborted) {
+        void (async()=>{
+          if(this.items.size) await this.client.request('thread/backgroundTerminals/clean',{threadId:this.threadId},5000)
+          await this.assertHandoffToolsSettled()
+          turn.input.signal.throwIfAborted()
+          await this.emit('assistant.message',turn.input.implementationHandoff!()!)
+          turn.resolve()
+        })().catch(error=>turn.reject(error instanceof Error?error:Error(String(error))))
+      }
       else if (p.turn?.status === 'completed') {
         if (turn.nativeGoal) {
           const nativeTurnId = notificationTurnId ?? turn.turnId
@@ -1303,11 +1353,12 @@ class BgsRuntime implements BeeGameSessionRuntime {
         return { contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : 'Host request failed' }], success: false }
       }
     }
+    // Saved native histories may still call these retired host tools.
     if (method === 'item/tool/call' && ['WriteProjectFile', 'EditProjectFile'].includes(p.tool)) {
       try {
         const finalOutput = active?.input.finalOutput
-        const documentWrite = finalOutput?.readOnly ? finalOutput.writeDocument : undefined
-        if (finalOutput?.readOnly && (!documentWrite || p.threadId !== this.threadId ||
+        const documentWrite = finalOutput?.writeDocument
+        if ((finalOutput?.readOnly || documentWrite) && (!documentWrite || p.threadId !== this.threadId ||
             !active?.turnId || p.turnId !== active.turnId))
           throw Error('Project files are read-only outside the current parent document task')
         const args = p.arguments

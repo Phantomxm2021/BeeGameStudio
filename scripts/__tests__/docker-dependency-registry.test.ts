@@ -17,6 +17,17 @@ describe('Docker dependency registry', () => {
     expect(lockfile).not.toContain('registry.npm.taobao.org')
   })
 
+  test('the backend image and CI use the supported sandbox-compatible Bun runtime', () => {
+    const dockerfile=readFileSync(join(repoRoot,'docker/Dockerfile.backend'),'utf8')
+    const workflow=readFileSync(join(repoRoot,'.github/workflows/backend-checks.yml'),'utf8')
+    const manifest=JSON.parse(readFileSync(join(repoRoot,'packages/agent-workflow-server/package.json'),'utf8'))
+    const versions=[...workflow.matchAll(/bun-version: '([^']+)'/g)].map(match=>match[1])
+    expect(versions.length).toBeGreaterThan(0)
+    expect(new Set(versions)).toEqual(new Set(['1.4.3']))
+    expect(dockerfile).toContain('FROM oven/bun:1.4.3-alpine AS backend-dependencies')
+    expect(manifest.engines.bun).toBe('>=1.4.3')
+  })
+
   test('frontend installs the locked workspace before building shared source', () => {
     const dockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.frontend'), 'utf8')
     const installIndex = dockerfile.indexOf('bun install --ignore-scripts --frozen-lockfile')
@@ -56,6 +67,10 @@ describe('Docker dependency registry', () => {
     expect(ignore.split('\n')).toContain('**')
     for (const pattern of ['!packages/**', '!apps/frontend/**', '**/node_modules', '**/dist', '**/.env', '**/.env.*']) {
       expect(ignore.split('\n')).toContain(pattern)
+    }
+    for (const name of ['desktop', 'game-portal', 'game-delivery']) {
+      expect(ignore.split('\n')).toContain(`!apps/${name}/package.json`)
+      expect(ignore.split('\n')).not.toContain(`!apps/${name}/**`)
     }
     expect(ignore).not.toContain('!vendor')
     expect(ignore).not.toContain('!Projects')

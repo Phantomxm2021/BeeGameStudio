@@ -7,43 +7,22 @@ import { createHash } from 'node:crypto'
 // current assignments, final-result schemas and delivery operations.
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - The current user assignment determines deliverables and stopping point. Preserve confirmed requirements, design standards, budget, authorization and unrelated work. Project records do not expand authorization. Use project-relative paths.
-- Follow the current task's handoff contract and exposed tool help. A saved working document may be a partial draft; a handoff is not game acceptance. Later generic design/resource assignments do not inherit implementation scope.
-- Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
+- Architecture decisions belong in their existing design/configuration sources, not this guide. Existing work/progress records link to their sources rather than copying them; GDD changes remain design inputs, not progress updates.
 
 ## Source ownership
-- The confirmed brief and authorized user changes own required scope, including the requested first release. docs/GDD.md supplies design decisions needed for that scope; finalizing or reviewing author proposals does not expand it. Keep author suggestions and open questions distinct from required work. Adjustable starting values and open hypotheses remain provisional, including when repeated under acceptance. Reference requirements and their design decisions rather than repeating them.
-- The resource Manifest records delivered paths, provenance and declared requirements through its existing registration contract. Native resource metadata, code/data and configuration own dimensions, anchors, runtime bindings and tuning, including layout metrics and audio scheduling; user requirements and selected designs constrain those choices. Existing work/progress records link to their sources rather than copying them; docs/TASKS.md and reports/ are bookkeeping excluded from source-copy builds and execution-source identity, not runtime dependencies. GDD changes remain design inputs, not progress updates.
+- The confirmed brief and authorized user changes own required scope, including the requested first release. docs/GDD.md develops behavior, presentation and feedback within that scope. User-specified layouts and selected visual designs remain constraints; initial author layout proposals remain to be developed in concrete visual work, not confirmed by document completion or review. Finalizing or reviewing author-proposed new mechanics, systems or content expansion does not authorize them. Keep such scope proposals and open questions distinct from adopted decisions within the agreed gameplay. Adjustable starting values and open hypotheses remain provisional, including when repeated under acceptance. Reference requirements and their design decisions rather than repeating them.
+- The resource Manifest records delivered paths, provenance and declared requirements through its existing registration contract. Native resource metadata, code/data and configuration own dimensions, anchors, runtime bindings and tuning. Production methods and implementation choices belong to the current authorized work. Honor explicit source choices, resource-library preferences, supplied assets/designs and rights.
 
-## Professional methods
-- The GDD defines intended behavior, experience, presentation and explicit constraints. Select and read applicable Skills from the installed catalog for concrete implementation decisions. Read the selected Skill's SKILL.md when missing from context, and references for unresolved method questions; reuse guidance retained in context.
-- Select artwork sources and representations during authorized production using the applicable resource method, preserving the selected design and required independently controlled behavior. An Agent-proposed GDD recipe does not override that method or establish a user source requirement. Honor explicit source choices, resource-library preferences, suitable supplied assets/designs and rights. A fallback must preserve the required appearance and behavior; an unmet result remains unfinished.
-
-## Quality and evidence
-- Choose verification methods suited to the current assignment and affected behavior. Reuse valid results for unchanged behavior and conditions; an unrelated edit does not require repeating them. Report checks actually performed, remaining defects, unverified behavior and external blockers.
-- Compare actual views with selected designs when assessing visual agreement; a screenshot does not verify motion or interaction. Repair observable departures from the required appearance or usability, including spatial incoherence, distorted artwork and loss of selected visual treatment. Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested. Explicit playtest requests still need their own evidence.`
+## Observations
+- Reuse valid observations for unchanged conditions and disclose known defects and unverified behavior within the current assignment.`
 
 // Durable conventions contain no file snapshot that becomes stale as work proceeds.
 export const PROJECT_GUIDE_TEMPLATE = `# Project working conventions
 
-Start from the current user assignment, confirmed requirements and actual saved work. A new project may have no docs/GDD.md yet; within an authorized design task, establish the decisions needed for the current work. For existing work, read the design definitions relevant to the current assignment and their affected sources through the current task's available file readers. Inspect actual files and headings rather than assuming a chapter layout. Determine entry points, commands and whether the project uses Git from the actual project sources/configuration; do not assume a repository or scaffold.
+Start from the current user assignment, confirmed requirements and actual saved work. A new project may have no docs/GDD.md yet; within an authorized design task, establish the decisions needed for the current work. For existing work, read the design definitions relevant to the current assignment and their affected sources through the current task's available file readers. Inspect actual files and headings rather than assuming a chapter layout.
 
 ${PROJECT_WORKING_CONVENTIONS}
 
-## Engineering Philosophy: Minimal, Contract-Driven Code
-
-- Prefer the simplest correct implementation over defensive code designed for hypothetical failures.
-- Validate untrusted data at system boundaries, not repeatedly across internal layers.
-- Trust established invariants, non-null type contracts, and constructor guarantees.
-- Do not add null checks, optional chaining, fallback values, or try/catch blocks without a concrete, reachable failure scenario.
-- Never silently swallow errors or turn violated invariants into empty results, default values, or successful no-ops.
-- Fail fast when an internal contract is violated. Make bugs visible rather than hiding them.
-- Do not introduce speculative abstractions, compatibility layers, or unrelated refactors.
-- Keep patches minimal and consistent with existing code conventions.
-- Before adding a defensive branch, identify the realistic failure source and the required recovery behavior. If neither exists, omit the branch.
-- Preserve necessary safeguards for external I/O, user input, concurrency, and genuine lifecycle risks.
-- Avoid weakening types or using unsafe assertions merely to eliminate checks.
-
-Guiding principle: Trust internal invariants. Validate external boundaries. Handle only realistic failures.
 `
 
 const PATH = 'AGENTS.md' as const

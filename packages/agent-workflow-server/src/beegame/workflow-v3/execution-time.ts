@@ -1,7 +1,7 @@
-import type { Run } from './state'
+import type { RuntimeRunState } from './store'
 
 /** Count observed Agent turn intervals, never the age of the project or delayed settlement. */
-export function projectExecutionTime(run: Run | undefined, writerActive: boolean, now = Date.now()):
+export function projectExecutionTime(run: Pick<RuntimeRunState, 'agentTurns' | 'writer'> | undefined, writerActive: boolean, now = Date.now()):
   { elapsed_ms: number; running: boolean } | undefined {
   if (!run?.agentTurns) return undefined
   let elapsed = 0, running = false

@@ -3,27 +3,24 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-/** Project-local entry stays readable; the implementation belongs to BGS.
- * Runtime access grants only its private module directory, not server sources. */
-export const CONTENT_CHECKER_ENTRY = `// BGS-managed checker entry. Run --help for the interface; this is not game source.
+type RuntimeModule = { root: string; path: string; moduleUrl: string }
+let checker: Promise<RuntimeModule> | undefined
+function productionEntry(kind: string, method: string) {
+  return `// BGS-managed ${kind} entry; run --help for the interface.
 try {
-  if (!process.versions.bun) throw new Error('BGS_BUN_REQUIRED: Run this entry with bun, not node (including --help). The shared content/media/resource implementation targets Bun; this is not a missing project dependency.');
+  if (!process.versions.bun) throw new Error('BGS_BUN_REQUIRED: Run this entry with bun, not node (including --help). The shared media/resource implementation targets Bun; this is not a missing project dependency.');
   const moduleUrl = process.env.BEEGAME_CONTENT_CHECKER_MODULE;
-  if (!moduleUrl) throw new Error('Content checker runtime is unavailable. Run this command in the BGS project execution environment.');
-  const { runGameContentCli } = await import(moduleUrl);
-  await runGameContentCli(process.argv.slice(2), { profile: 'current' });
+  if (!moduleUrl) throw new Error('Resource/media runtime is unavailable. Run this command in the BGS project execution environment.');
+  const { ${method} } = await import(moduleUrl);
+  await ${method}(process.argv.slice(2), { profile: 'current' });
 } catch (error) {
   console.log(JSON.stringify({ valid: false, issues: [error instanceof Error ? error.message : String(error)] }));
   process.exitCode = 1;
 }
 `
-
-type RuntimeModule = { root: string; path: string; moduleUrl: string }
-let checker: Promise<RuntimeModule> | undefined
-let projectReads: Promise<RuntimeModule> | undefined
-export const CONTENT_BINDING_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'binding entry').replace('runGameContentCli', 'runContentBindingCli').replace('runGameContentCli', 'runContentBindingCli')
-export const MEDIA_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'media entry').replaceAll('runGameContentCli', 'runMediaProductionCli')
-export const RESOURCE_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'resource entry').replaceAll('runGameContentCli', 'runResourceProductionCli')
+}
+export const MEDIA_PRODUCTION_ENTRY = productionEntry('media', 'runMediaProductionCli')
+export const RESOURCE_PRODUCTION_ENTRY = productionEntry('resource', 'runResourceProductionCli')
 async function bundleRuntime(entry: string, filename: string): Promise<RuntimeModule> {
   // Use a fresh process: Bun can misresolve package-scoped imports after repeated builds.
   const child = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL(entry, import.meta.url)),
@@ -39,11 +36,6 @@ async function bundleRuntime(entry: string, filename: string): Promise<RuntimeMo
 }
 
 export function sharedContentChecker(): Promise<RuntimeModule> {
-  return checker ??= bundleRuntime('./game-content-validation-cli.ts', 'check-content.mjs')
+  return checker ??= bundleRuntime('./resource-tools-runtime.ts', 'resource-tools.mjs')
     .catch(error => { checker = undefined; throw error })
-}
-
-export function sharedProjectReads(): Promise<RuntimeModule> {
-  return projectReads ??= bundleRuntime('./ui-layout-tool.ts', 'ui-layout-tool.mjs')
-    .catch(error => { projectReads = undefined; throw error })
 }

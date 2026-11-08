@@ -205,3 +205,14 @@ test.each(['chat-completions','anthropic-messages','gemini','responses'])(
     expect(models.every(model=>model==='fixture-model')).toBe(true)
   }finally{await bridge.close();upstream.stop(true);capture.mockRestore()}
 },10000)
+
+
+test('OpenCode correlation header is preserved without accepting arbitrary header contents', async () => {
+  const id = '01a1aff8-b9b5-7b65-98c3-87411d962d3e'
+  const error = await providerHttpError(Response.json({error:{code:'inference_failed'}},
+    {status:429,headers:{'x-opencode-log-id':id}}),new AbortController().signal)
+  expect(error.diagnostics).toEqual({bodyStatus:'parsed',code:'inference_failed',requestId:id})
+  const invalid = await providerHttpError(new Response(null,
+    {status:429,headers:{'x-opencode-log-id':'Bearer PRIVATE_TOKEN'}}),new AbortController().signal)
+  expect(invalid.diagnostics).toEqual({bodyStatus:'empty'})
+})

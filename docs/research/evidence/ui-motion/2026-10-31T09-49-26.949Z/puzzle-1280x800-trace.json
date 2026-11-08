@@ -1,0 +1,169 @@
+{
+  "trace": [
+    {
+      "at": 1793440180418,
+      "type": "click",
+      "name": "Begin"
+    },
+    {
+      "at": 1793440180561,
+      "type": "click",
+      "name": "Pause"
+    },
+    {
+      "at": 1793440180994,
+      "type": "click",
+      "name": "Resume"
+    },
+    {
+      "at": 1793440180996,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440180997,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440180997,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440180997,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440181425,
+      "type": "click",
+      "name": "Toggle middle"
+    },
+    {
+      "at": 1793440181468,
+      "type": "click",
+      "name": "Undo"
+    },
+    {
+      "at": 1793440181511,
+      "type": "click",
+      "name": "Toggle left"
+    },
+    {
+      "at": 1793440181512,
+      "type": "click",
+      "name": "Toggle right"
+    },
+    {
+      "at": 1793440181853,
+      "type": "click",
+      "name": "Try again"
+    }
+  ],
+  "frames": [
+    {
+      "name": "title",
+      "file": "puzzle-1280x800-title.png",
+      "beforeCapture": {
+        "at": 260.5,
+        "state": "Ready",
+        "text": "Lights 101",
+        "focus": "Begin",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 318
+    },
+    {
+      "name": "play",
+      "file": "puzzle-1280x800-play.png",
+      "beforeCapture": {
+        "at": 393.30000019073486,
+        "state": "Playing",
+        "text": "Lights 101",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 459.19999980926514
+    },
+    {
+      "name": "pause-0",
+      "file": "puzzle-1280x800-pause-0.png",
+      "beforeCapture": {
+        "at": 462.80000019073486,
+        "state": "Paused",
+        "text": "Lights 101",
+        "focus": "Resume",
+        "animations": [
+          {
+            "time": 0,
+            "state": "running",
+            "duration": 180
+          }
+        ],
+        "reduced": false
+      },
+      "afterCaptureAt": 522.3000001907349
+    },
+    {
+      "name": "pause-1",
+      "file": "puzzle-1280x800-pause-1.png",
+      "beforeCapture": {
+        "at": 569.4000000953674,
+        "state": "Paused",
+        "text": "Lights 101",
+        "focus": "Resume",
+        "animations": [
+          {
+            "time": 83.34999984800817,
+            "state": "running",
+            "duration": 180
+          }
+        ],
+        "reduced": false
+      },
+      "afterCaptureAt": 620.5999999046326
+    },
+    {
+      "name": "pause-2",
+      "file": "puzzle-1280x800-pause-2.png",
+      "beforeCapture": {
+        "at": 843.0999999046326,
+        "state": "Paused",
+        "text": "Lights 101",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 893.8000001907349
+    },
+    {
+      "name": "rapid-return",
+      "file": "puzzle-1280x800-rapid-return.png",
+      "beforeCapture": {
+        "at": 1268.0999999046326,
+        "state": "Playing",
+        "text": "Lights 101",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 1319.0999999046326
+    },
+    {
+      "name": "result",
+      "file": "puzzle-1280x800-result.png",
+      "beforeCapture": {
+        "at": 1689.1999998092651,
+        "state": "Won",
+        "text": "Lights 000",
+        "focus": "Try again",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 1752.5999999046326
+    }
+  ]
+}

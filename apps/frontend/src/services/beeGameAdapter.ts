@@ -2419,7 +2419,7 @@ type BeeGameIntakeJobPoll =
         options?: BeeGameIntakeOption[]
       }
     }
-  | { status: 'failed'; error?: string }
+  | { status: 'failed'; error?: string; errorStatus?: number; errorDetails?: Record<string, unknown> }
 
 const BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS = 1500
 const BEEGAME_INTAKE_JOB_MAX_POLLS = 240
@@ -2495,8 +2495,11 @@ async function runIdeaIntakeJob(
     const poll = await readResponse<BeeGameIntakeJobPoll>(response)
     retryIntervalMs = BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS
     if (poll.status === 'completed') return poll.result
-    if (poll.status === 'failed')
-      throw new Error(poll.error || 'BeeGame intake failed')
+    if (poll.status === 'failed') {
+      throw Object.assign(new Error(poll.error || 'BeeGame intake failed'), {
+        status: poll.errorStatus, details: poll.errorDetails,
+      })
+    }
     await sleep(BEEGAME_INTAKE_JOB_POLL_INTERVAL_MS)
   }
   throw new Error('BeeGame intake timed out')

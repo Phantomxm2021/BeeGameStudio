@@ -1,0 +1,157 @@
+{
+  "trace": [
+    {
+      "at": 1793440175392,
+      "type": "click",
+      "name": "Begin"
+    },
+    {
+      "at": 1793440175528,
+      "type": "click",
+      "name": "Pause"
+    },
+    {
+      "at": 1793440176043,
+      "type": "click",
+      "name": "Resume"
+    },
+    {
+      "at": 1793440176045,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440176045,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440176046,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440176046,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440176483,
+      "type": "down",
+      "code": "ArrowRight"
+    },
+    {
+      "at": 1793440177284,
+      "type": "down",
+      "code": "Space"
+    },
+    {
+      "at": 1793440177369,
+      "type": "up",
+      "code": "Space"
+    },
+    {
+      "at": 1793440179149,
+      "type": "up",
+      "code": "ArrowRight"
+    },
+    {
+      "at": 1793440179516,
+      "type": "click",
+      "name": "Try again"
+    }
+  ],
+  "frames": [
+    {
+      "name": "title",
+      "file": "platformer-reduced-800x600-title.png",
+      "beforeCapture": {
+        "at": 258.30000019073486,
+        "state": "Ready",
+        "text": "Grounded",
+        "focus": "Begin",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 362.59999990463257
+    },
+    {
+      "name": "play",
+      "file": "platformer-reduced-800x600-play.png",
+      "beforeCapture": {
+        "at": 437.30000019073486,
+        "state": "Playing",
+        "text": "Grounded",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 497.59999990463257
+    },
+    {
+      "name": "pause-0",
+      "file": "platformer-reduced-800x600-pause-0.png",
+      "beforeCapture": {
+        "at": 500.2000002861023,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 579.5999999046326
+    },
+    {
+      "name": "pause-1",
+      "file": "platformer-reduced-800x600-pause-1.png",
+      "beforeCapture": {
+        "at": 626.8000001907349,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 712.9000000953674
+    },
+    {
+      "name": "pause-2",
+      "file": "platformer-reduced-800x600-pause-2.png",
+      "beforeCapture": {
+        "at": 934.9000000953674,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 1012.9000000953674
+    },
+    {
+      "name": "rapid-return",
+      "file": "platformer-reduced-800x600-rapid-return.png",
+      "beforeCapture": {
+        "at": 1388.7000002861023,
+        "state": "Playing",
+        "text": "Grounded",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 1447
+    },
+    {
+      "name": "result",
+      "file": "platformer-reduced-800x600-result.png",
+      "beforeCapture": {
+        "at": 4374.300000190735,
+        "state": "Won",
+        "text": "Grounded",
+        "focus": "Try again",
+        "animations": [],
+        "reduced": true
+      },
+      "afterCaptureAt": 4486.300000190735
+    }
+  ]
+}

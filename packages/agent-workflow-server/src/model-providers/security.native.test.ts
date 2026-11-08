@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from '../bgs/fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises'
 import sharp from 'sharp'
@@ -117,7 +118,8 @@ for (const malformedSuffix of [false, true]) nativeTest('converted provider unkn
   } finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 25_000)
 nativeTest('native stream retries retain partial supplier usage through the runner and billing outbox', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-native-partial-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-native-partial-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture', 'SKILL.md'), '---\nname: fixture\ndescription: Offline usage accounting fixture.\n---\nUse only the local fixture response.\n')
   let requests = 0
@@ -134,6 +136,7 @@ nativeTest('native stream retries retain partial supplier usage through the runn
   const recordedDeltas: number[] = []
   const runner = createBgsRunner({ resolveOutboundTarget: async value => ({ url: new URL(value),
     addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }) })
+  await writeFixturePlugin(catalog)
   const manager = new BeeGameSessionManager(runner, root, () => ({
     BEEGAME_CONFIG_DIR: join(root, 'config'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
     BEEGAME_MODEL_TYPE: 'anthropic', BEEGAME_API_PROTOCOL: 'anthropic-messages', BEEGAME_MODEL: 'fixture-model',

@@ -11,3 +11,12 @@ test('requires both resource selector credentials and a valid service URL', () =
   expect(() => resolveResourceSelectionRuntimeConfig({ BEEGAME_RESOURCE_SERVER_URL: 'resource.test', BEEGAME_RESOURCE_SERVICE_TOKEN: 'secret' })).toThrow('HTTP(S) URL')
   expect(resolveResourceSelectionRuntimeConfig({ BEEGAME_RESOURCE_SERVER_URL: 'https://resource.test/', BEEGAME_RESOURCE_SERVICE_TOKEN: 'secret' })).toEqual({ baseUrl: 'https://resource.test/', serviceToken: 'secret' })
 })
+
+
+test('local desktop uses authenticated public resource access without shipping internal curation credentials', () => {
+  const env = { NODE_ENV: 'production', BEEGAME_WORKFLOW_V3_STORE: 'local-single-process' }
+  expect(resolveResourceSelectionRuntimeConfig(env)).toBeUndefined()
+  expect(resolveResourceSelectionRuntimeConfig({ ...env, BEEGAME_RESOURCE_SERVER_URL: 'https://resources.example.test' }))
+    .toEqual({ baseUrl: 'https://resources.example.test' })
+  expect(() => resolveResourceSelectionRuntimeConfig({ ...env, BEEGAME_RESOURCE_SERVICE_TOKEN: 'secret' })).toThrow('configured together')
+})

@@ -11,10 +11,12 @@ export const MAX_SKILL_REQUEST_BYTES = 12 * 1024 * 1024
 export async function fetchEnabledUserSkills(
   config: BeeGameSkillsConfig,
   userId: string,
+  signal?: AbortSignal,
 ): Promise<BeeGameUserSkill[]> {
   const response = await fetch(
     `${config.apiBaseUrl}/api/internal/user-skills/enabled?userId=${encodeURIComponent(userId)}`,
     {
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
       headers: {
         ...(config.serviceToken ? { authorization: `Bearer ${config.serviceToken}` } : {}),
       },

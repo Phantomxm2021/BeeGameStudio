@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relay crossing · interactive study</title>
+<style>
+  :root {color-scheme:dark;font:16px system-ui;background:#101c22;color:#f4ead9}
+  body {max-width:46rem;margin:8vh auto;padding:0 1rem}
+  h1 {font:1.8rem Georgia,serif;margin-bottom:.25rem}
+  svg {width:100%;display:block;background:#172932}
+  svg text {fill:#ebdfce;font:13px system-ui}
+  .rail {fill:none;stroke:#557480;stroke-width:5}
+  .selected {stroke:#e3b277}
+  .controls {display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:1rem 0}
+  button {font:inherit;padding:.45rem .8rem}
+  [aria-pressed=true] {outline:2px solid #e3b277}
+  #cue {min-height:2.6em}
+  #flare {fill:none;stroke:#f8d692;stroke-width:3;opacity:0}
+  #flare.hit {animation:arrive .55s ease-out}
+  @keyframes arrive {from{r:9;opacity:1}to{r:24;opacity:0}}
+  @media(prefers-reduced-motion:reduce){#flare.hit{animation:none}}
+</style>
+<h1>Relay crossing</h1>
+<p>Send the pulse to the marked receiver. Switch tracks before the junction.</p>
+<svg viewBox="0 0 560 210" role="img" aria-label="A signal track forks toward an upper and a lower receiver.">
+  <path id="lead" class="rail selected" d="M36 105 H228"/>
+  <path id="upper" class="rail selected" d="M228 105 C282 105 278 52 342 52 H500"/>
+  <path id="lower" class="rail" d="M228 105 C282 105 278 158 342 158 H500"/>
+  <circle cx="36" cy="105" r="9" fill="#b2c2bf"/>
+  <circle id="mark" cx="500" cy="158" r="15" stroke="#a6ddd6" stroke-width="3" fill="none"/>
+  <text x="475" y="29">Upper</text><text x="475" y="193">Lower</text>
+  <circle id="pulse" cx="36" cy="105" r="7" fill="#fff1bd"/>
+  <circle id="flare" cx="500" cy="158" r="12"/>
+</svg>
+<p id="cue" role="status">First destination: lower receiver.</p>
+<div class="controls">
+  <button id="send">Send pulse</button>
+  <button id="up" aria-pressed="true" disabled>↑ Upper</button>
+  <button id="down" aria-pressed="false" disabled>↓ Lower</button>
+</div>
+<div class="controls">
+  <label><input type="checkbox" id="sound" checked> Sound</label>
+  <label><input type="checkbox" id="phrase" checked> Travelling melody</label>
+</div>
+<p>Watch when the switch stops accepting input. Send again with the melody off to hear what the arrival cue alone communicates.</p>
+<script>
+  const el = id => document.getElementById(id);
+  const paths = [el('upper'), el('lower')];
+  const switches = [el('up'), el('down')];
+  const lead = el('lead');
+  const pulse = el('pulse');
+  const names = ['upper', 'lower'];
+  const beats = [220, 277.18, 329.63, 415.30, 329.63, 277.18];
+  let audio, mix, running = false, locked = false, route = 0, target = 1, departure, lastBeat;
+
+  function soundOnGesture() {
+    if (!el('sound').checked) return;
+    if (!audio) {
+      audio = new AudioContext();
+      mix = audio.createGain();
+      mix.connect(audio.destination);
+    }
+    audio.resume().catch(() => { el('cue').textContent += ' Audio playback unavailable.'; });
+  }
+  function note(hz, length, level) {
+    if (!audio || audio.state !== 'running' || !el('sound').checked) return;
+    const osc = audio.createOscillator(), envelope = audio.createGain(), now = audio.currentTime;
+    osc.frequency.value = hz;
+    envelope.gain.setValueAtTime(.001, now);
+    envelope.gain.exponentialRampToValueAtTime(level, now + .014);
+    envelope.gain.exponentialRampToValueAtTime(.001, now + length);
+    osc.connect(envelope).connect(mix);
+    osc.onended = () => { osc.disconnect(); envelope.disconnect(); };
+    osc.start(now);
+    osc.stop(now + length);
+  }
+  function select(value) {
+    route = value;
+    switches.forEach((button, i) => {
+      button.setAttribute('aria-pressed', String(i === route));
+      paths[i].classList.toggle('selected', i === route);
+    });
+  }
+  function aim(value) {
+    target = value;
+    el('mark').setAttribute('cy', target ? 158 : 52);
+  }
+  function draw(path, progress) {
+    const point = path.getPointAtLength(progress * path.getTotalLength());
+    pulse.setAttribute('cx', point.x);
+    pulse.setAttribute('cy', point.y);
+  }
+  function frame(time) {
+    const age = (time - departure) / 1000;
+    const beat = Math.min(5, Math.floor(age / .48));
+    if (beat !== lastBeat) {
+      lastBeat = beat;
+      if (el('phrase').checked) note(beats[beat], .30, .055);
+    }
+    if (age < 1.5) draw(lead, age / 1.5);
+    else {
+      if (!locked) {
+        locked = true;
+        switches.forEach(button => { button.disabled = true; });
+        el('cue').textContent = 'Pulse on the ' + names[route] + ' branch.';
+      }
+      draw(paths[route], Math.min(1, (age - 1.5) / 1.3));
+    }
+    if (age < 2.8) { requestAnimationFrame(frame); return; }
+    running = false;
+    const matched = route === target;
+    el('cue').textContent = matched ? 'Signal received. Next destination: ' + names[1-target] + '.' :
+      'Wrong receiver. Retry the ' + names[target] + ' track.';
+    el('flare').setAttribute('cy', route ? 158 : 52);
+    el('flare').classList.add('hit');
+    note(matched ? 659.25 : 146.83, .42, .17);
+    el('send').textContent = matched ? 'Next signal' : 'Retry signal';
+    el('send').disabled = false;
+    el('send').focus({preventScroll:true});
+    // Keep the marker on the actual destination until the next departure.
+    if (matched) target = 1-target;
+  }
+  el('send').onclick = () => {
+    if (running) return;
+    soundOnGesture();
+    aim(target);
+    running = true; locked = false; lastBeat = -1;
+    el('flare').classList.remove('hit');
+    draw(lead, 0);
+    departure = performance.now();
+    el('send').disabled = true;
+    switches.forEach(button => { button.disabled = false; });
+    switches[route].focus({preventScroll:true});
+    el('cue').textContent = 'Route to the ' + names[target] + ' receiver.';
+    requestAnimationFrame(frame);
+  };
+  switches.forEach((button,i) => { button.onclick = () => select(i); });
+  document.addEventListener('keydown', e => {
+    if (running && !locked && ['ArrowUp','ArrowDown'].includes(e.key)) {
+      e.preventDefault();
+      select(Number(e.key === 'ArrowDown'));
+      switches[route].focus({preventScroll:true});
+    }
+  });
+  el('sound').onchange = () => {
+    soundOnGesture();
+    if (mix) mix.gain.value = Number(el('sound').checked);
+  };
+</script>
+</html>

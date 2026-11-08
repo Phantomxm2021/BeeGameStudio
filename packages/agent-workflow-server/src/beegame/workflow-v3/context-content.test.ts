@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRun } from './state'
 import { skillEvidence, priorMainSkillLoads } from './context'
+import { agentSkillFacts } from './agent-measurement'
 import { versionsMatch } from './checks'
 import { runContentCheck } from './content-checks'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
@@ -175,5 +176,16 @@ test('Shell read links and former read statuses never enter historical loader re
     {attemptId:'current',requestKey:'current',sessionId:'chat',workerId:'worker',fence:2,status:'running',startedAt:'now'}]
   const before=structuredClone(run)
   expect(priorMainSkillLoads(run,'current')).toEqual({recordedMainLoads:[],contextPresence:'unverified',application:'unverified'})
+  const facts=agentSkillFacts(run,run.agentTurns[0]!)
+  expect(facts.currentTurnUses.every(use=>!Object.hasOwn(use,'status'))).toBe(true)
+  expect(facts.evidenceLimit).toContain('commands without that metadata are not indexed')
+  expect(facts.evidenceLimit).toContain('Missing links do not establish no use')
+  const unindexed=skillEvidence([{id:2,type:'tool.completed',payload:{toolName:'Shell',toolUseID:'batch',exitCode:0,
+    input:{command:'cat /catalog/a/SKILL.md /catalog/b/SKILL.md'},output:'Complete A and B Skill bodies'}}])
+  expect(unindexed).toEqual([])
+  const currentFacts=agentSkillFacts(run,run.agentTurns[1]!,[...unindexed,...reads])
+  expect(currentFacts.currentTurnUses).toEqual(reads)
+  expect(currentFacts.application).toBe('unverified')
+  expect(agentSkillFacts(run,run.agentTurns[1]!).currentTurnEvidence).toBe('not-recorded-yet')
   expect(run).toEqual(before)
 })

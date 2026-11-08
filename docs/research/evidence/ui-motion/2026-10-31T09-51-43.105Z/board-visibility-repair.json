@@ -1,0 +1,29 @@
+{
+  "reproduce": "Begin; Toggle middle; Undo; Toggle left; Toggle right at desktop 800x600 with reduced motion",
+  "observed": "Before screenshot shows result card covering part of completed third tile; after screenshot and bounds retain all tiles",
+  "rootCause": "Half-width stacked result card exceeds quiet area under board at the tested viewport",
+  "change": "Compact full-width bottom row for this prototype only, unchanged board/camera/input route",
+  "versions": [
+    {
+      "directory": "2026-10-31T09-49-26.949Z",
+      "sourceSha256": "e626edbf33c02ce8e3ef870f3bb0b63facab6a1235e18e8e326ad8324409bf77",
+      "screenshot": "puzzle-reduced-800x600-result.png",
+      "boardObservation": []
+    },
+    {
+      "directory": "2026-10-31T09-51-43.105Z",
+      "sourceSha256": "5ed0443c5fdb0a076001ef2e693aa5ca28a9f0243d59b59433d75afc1be0988e",
+      "screenshot": "puzzle-reduced-800x600-result.png",
+      "boardObservation": [
+        {
+          "name": "completed-board-visibility",
+          "geometry": {
+            "tileBottom": 323.32465277777777,
+            "resultTop": 405.59375
+          }
+        }
+      ]
+    }
+  ],
+  "limitation": "Manually observed and repaired local prototype, not a BGS generated project or universal puzzle layout rule"
+}

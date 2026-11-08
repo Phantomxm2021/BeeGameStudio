@@ -470,24 +470,32 @@ it('keeps a mixed activity and final answer in their original positions', () => 
   expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
 });
 
-it.each(['zh', 'en'] as const)('shows a repeated native failure once with retry in live and restored Chat: %s', lang => {
-  const reason = 'Independent review reached max_output_tokens; no complete report.';
+it.each([
+  ['zh', false], ['en', false], ['zh', true], ['en', true],
+] as const)('shows a repeated native failure once with retry in live and restored Chat: %s, multiline=%s', (lang, multiline) => {
+  const reason = multiline
+    ? `Upstream request failed:
+[invalid_request_error] this feature is not yet supported by atlas
+(request_id: gw-1ab377dd20b0-32da2)`
+    : 'Independent review reached max_output_tokens; no complete report.';
+  const displayedReason = reason.replace(/\s+/g, ' ').trim();
   const prefix = lang === 'zh' ? '任务已停止，尚未完成：' : 'Task stopped before completion: ';
+  const notice = prefix + (multiline ? ' ' : '') + displayedReason;
   const error: ChatDisplayMessage = { id: 'failure', taskId: 'session', turnId: 'turn', sender: 'system',
     type: 'error', taskKind: 'runtime_error', content: reason, timestamp: 1000 };
   const stop: ChatDisplayMessage = { id: 'host-stop', taskId: 'session', sender: 'system',
-    taskKind: 'delivery_error', content: prefix + reason, timestamp: 2000 };
+    taskKind: 'delivery_error', content: notice, timestamp: 2000 };
   const onRetry = vi.fn();
   const { rerender } = render(<BeeGameCollaborationFeed messages={[error, stop]} lang={lang}
     retry={{ messageId: error.id, disabled: false, onRetry }} />);
   expect(screen.getAllByRole('alert')).toHaveLength(1);
-  expect(screen.getAllByText(reason)).toHaveLength(1);
+  expect(screen.getAllByText(displayedReason)).toHaveLength(1);
   expect(screen.queryByTestId('beegame-context-separator')).not.toBeInTheDocument();
   fireEvent.click(within(screen.getByRole('alert')).getByRole('button'));
   expect(onRetry).toHaveBeenCalledTimes(1);
   const events = [
     { id: 1, sessionId: 'session', turnId: 'turn', type: 'turn.failed', text: reason, createdAt: new Date(1000).toISOString() },
-    { id: 2, sessionId: 'session', type: 'system.status', text: prefix + reason, createdAt: new Date(2000).toISOString(),
+    { id: 2, sessionId: 'session', type: 'system.status', text: notice, createdAt: new Date(2000).toISOString(),
       payload: { subtype: 'delivery_error', category: 'workflow-blocked' } },
   ];
   const restored = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('project', events)));
@@ -495,14 +503,14 @@ it.each(['zh', 'en'] as const)('shows a repeated native failure once with retry 
   rerender(<BeeGameCollaborationFeed messages={restored} lang={lang}
     retry={{ messageId: failure.id, disabled: false, onRetry }} />);
   expect(screen.getAllByRole('alert')).toHaveLength(1);
-  expect(screen.getAllByText(reason)).toHaveLength(1);
+  expect(screen.getAllByText(displayedReason)).toHaveLength(1);
   expect(screen.queryByTestId('beegame-context-separator')).not.toBeInTheDocument();
   expect(within(screen.getByRole('alert')).getByRole('button')).toBeEnabled();
   expect(events).toHaveLength(2);
 });
 
 it.each(['different reason', 'different session', 'different turn', 'new user request'])(
-  'preserves an independent workflow-stop notice: %s', difference => {
+  'hides every workflow-stop notice regardless of adjacency or identity: %s', difference => {
     const reason = 'Model response failed';
     const notice = '任务已停止，尚未完成：' + (difference === 'different reason' ? 'Required handoff is missing' : reason);
     const messages: ChatDisplayMessage[] = [
@@ -514,16 +522,30 @@ it.each(['different reason', 'different session', 'different turn', 'new user re
     ];
     render(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
     expect(screen.getByRole('alert')).toHaveTextContent(reason);
-    expect(screen.getByTestId('beegame-context-separator')).toHaveTextContent(notice);
+    expect(screen.queryByTestId('beegame-context-separator')).not.toBeInTheDocument();
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
   },
 );
 
-it('shows the actual platform handoff error instead of a generic context label', () => {
-  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[{
-    id: 'delivery-error', sender: 'system', taskKind: 'delivery_error',
-    content: '交付未能继续：测试清理失败', timestamp: Date.now(),
+it.each([
+  'exceeded retry limit, last status: 429 Too Many Requests',
+  '交付未能继续：测试清理失败',
+  '任务已停止，尚未完成：任意未预设的原因',
+  'Task stopped before completion: an unrelated reason',
+  'Unknown host delivery message without a known prefix',
+])('hides standalone host delivery receipts without matching error text: %s', content => {
+  const { rerender } = render(<BeeGameCollaborationFeed messages={[{
+    id: 'delivery-error', sender: 'system', taskKind: 'delivery_error', content, timestamp: 1,
   }]} lang="zh" />);
-  expect(screen.getByTestId('beegame-context-separator')).toHaveTextContent('交付未能继续：测试清理失败');
+  expect(screen.queryByText(content)).not.toBeInTheDocument();
+  expect(screen.queryByTestId('beegame-context-separator')).not.toBeInTheDocument();
+  const legacy: ChatDisplayMessage & { task_kind: string } = {
+    id: 'legacy-delivery-error', sender: 'system', task_kind: 'delivery_error',
+    type: 'error', content, timestamp: 1,
+  };
+  rerender(<BeeGameCollaborationFeed messages={[legacy]} lang="en" />);
+  expect(screen.queryByText(content)).not.toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
 it.each([['zh', '等待模型响应'], ['en', 'Waiting for the model response']] as const)('labels an unobserved model response as waiting: %s', (lang, label) => {

@@ -1,9 +1,11 @@
+import { produceResources } from '../resource-production'
+import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import {test,expect} from 'bun:test'
 import {mkdtemp,mkdir,writeFile,readFile,rm,realpath,symlink} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {createRun,type AgentTurn} from './state'
-import {DESIGN_DECISION_SCOPE,designDocumentSnapshot,initialProductionAssignment,prepareProductionHandoff,prepareDesignDocumentHandoff,verifyProductionHandoff,productionAssignmentPrompt,productionAssignmentFacts,nextProductionStage,messageProductionAssignment,selectedProductionVisualSources,productionOutputSchema,parseProductionResult} from './production-workflow'
+import {createRun,type Run,type AgentTurn} from './state'
+import {DESIGN_DECISION_SCOPE,designDocumentSnapshot,initialProductionAssignment,isContinuousGameAuthor,prepareProductionHandoff,prepareDesignDocumentHandoff,verifyProductionHandoff,productionAssignmentPrompt,productionAssignmentBaseInstructions,productionWorkflowToolDescription,productionAssignmentFacts,nextProductionStage,messageProductionAssignment,selectedProductionVisualSources,productionOutputSchema,parseProductionResult,implementationVerificationHandoff,verificationImplementation,parseImplementationVerification,implementationVerificationOutputSchema} from './production-workflow'
 
 async function fixture() {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-design-coverage-')))
@@ -82,26 +84,37 @@ test('design guidance leaves content choices within scope without forcing a Skil
     const prompt=productionAssignmentPrompt(f.run,f.turn.production!)
     const facts=productionAssignmentFacts(f.run,f.turn.production!)
     expect(facts).not.toHaveProperty('directions')
-    expect(prompt).toContain('Choose the content, structure and depth')
+    expect(prompt).toContain('Choose the design methods and the content, structure and depth')
     expect(prompt).not.toContain('usable initial tuning')
     expect(prompt).not.toContain('identified current feasibility question')
     expect(prompt).not.toContain('Resolve resource families and the platform/engine approach')
     expect(prompt).toContain('BGS current production stage: design')
-    expect(prompt).toContain('Determine the product decisions still needed to begin the current authorized work')
-    expect(prompt).toContain('For document-only work, answer the requested design questions')
-    expect(prompt).toContain('Implementation tuning and resource production belong to implementation')
+    expect(prompt).toContain('Develop the currently authorized player experience')
+    expect(prompt).toContain('A document-only commission answers its requested design questions')
+    expect(prompt).toContain('This assignment does not produce game code or runtime assets')
+    expect(prompt).toContain('from the confirmed brief and existing work')
     expect(prompt).not.toContain('Record governing gameplay quantities')
-    expect(prompt).toContain('preserving unrelated confirmed decisions in existing work')
-    expect(prompt).toContain('Use the confirmed brief as source data')
+    expect(prompt).toContain('Preserve user requirements and selected designs')
+    expect(prompt).toContain('from the confirmed brief and existing work')
     expect(prompt).not.toContain('Select artwork sources and representations')
-    expect(prompt).toContain('if it already supplies those decisions, record that conclusion directly')
-    expect(prompt).toContain('not game code or assets')
+    expect(prompt).not.toContain('Keep each rule or presentation decision in one place; refer to that definition from related flows and interfaces')
+    expect(prompt).toContain('does not produce game code or runtime assets')
+    expect(prompt).not.toContain('Before specialist work, read the applicable Skills and necessary references from the available catalog')
+    expect(prompt).not.toContain('When existing evidence is insufficient for the current question, use available search tools')
+    expect(prompt).not.toContain('Resolve open visual choices through relevant art-direction methods')
+    expect(prompt).not.toContain('and actual pictures')
+    expect(prompt).toContain('scene, subjects, interface, soundscape and feedback together')
+    expect(prompt).toContain('record the resulting decisions rather than specifying unresolved layout details in advance')
+    expect(prompt).toContain('optional system imagegen work')
+    expect(prompt).toContain('Retain chosen project images with BgsWorkflow')
+    expect(prompt).toContain('BgsWorkflow({action:"select-visual",summary,sections:[],files:')
     expect(prompt).not.toContain('After necessary self-checks')
     expect(prompt).not.toContain('numerical tuning, spatial layout and presentation belong to their owning chapters')
     expect(prompt).not.toMatch(/\$[A-Za-z][A-Za-z0-9_-]*/)
     expect(productionAssignmentFacts(f.run,f.turn.production!)).not.toHaveProperty('requiredSkills')
-    expect(prompt).toContain('WriteProjectFile/EditProjectFile')
-    expect(prompt).toContain('ready or blocked result')
+    expect(prompt).toContain('Save the resulting design record in docs/GDD.md')
+    expect(prompt).not.toContain('WriteProjectFile/EditProjectFile')
+    expect(prompt).toContain('return ready or blocked through the current final contract')
     expect(prompt).not.toContain('complete Markdown document in document')
     expect(prompt).not.toContain('nextDesign')
     f.run.requirements.constraints.platform='VR/AR'
@@ -112,7 +125,7 @@ test('design guidance leaves content choices within scope without forcing a Skil
     const visual=productionAssignmentPrompt(f.run,{...f.turn.production!,stage:'visual'})
     expect(visual).toContain('requested player-visible screens/states')
     expect(visual).toContain('necessary subjects, information, actions, trigger conditions and confirmed visual direction')
-    expect(visual).toContain('Use applicable visual-design guidance for production methods')
+    expect(visual).not.toContain('Use applicable visual-design guidance for production methods')
     expect(visual).toContain('through the final ready/blocked JSON result')
     expect(visual).toContain('Keep usable concepts despite ratio deviation')
     expect(visual).toContain('text-only check of the final compiled prompt')
@@ -125,22 +138,25 @@ test('design guidance leaves content choices within scope without forcing a Skil
     expect(visual).not.toContain('report claims that present a target as a verified output fact')
     expect(visual).toContain('This stage does not implement the game or establish runtime behavior')
     const implementation=productionAssignmentPrompt(f.run,{stage:'implementation',originRequestKey:'start'})
-    expect(implementation).toContain('Choose task organization from the current scope and dependencies')
-    expect(implementation).toContain('Reuse a usable existing plan')
+    expect(implementation).not.toContain('Choose task organization from the current scope and dependencies')
+    expect(implementation).not.toContain('Reuse a usable existing plan')
     expect(implementation).not.toContain('game-implementation-planning')
     expect(implementation).not.toContain('game-plan-execution')
     expect(implementation).not.toContain('evidence-before-completion')
     expect(implementation).not.toContain("For a new game's first implementation")
     expect(implementation).not.toContain('If no usable plan exists')
-    expect(implementation).toContain('preserve completed work')
     expect(implementation).not.toContain('explicit delivery submission')
     expect(implementation).toContain('checks actually performed')
     expect(implementation).not.toContain('Ending a native turn alone is not delivery')
-    expect(implementation).toContain('Use applicable professional guidance for implementation methods')
+    expect(implementation).not.toContain('Use applicable professional guidance for implementation methods')
     expect(implementation).not.toMatch(/\$[A-Za-z][A-Za-z0-9_-]*/)
-    expect(implementation).toContain('required result and explicit constraints')
+    expect(implementation).toContain('confirmed requirements, relevant GDD decisions and existing work')
+    expect(implementation).toContain('Before specialist work, read the applicable Skills and necessary references from the available catalog')
+    expect(implementation).toContain('When existing evidence is insufficient for the current question, use available search tools')
+    expect(prompt).not.toContain('Before specialist work,')
+    expect(implementation.match(/Before specialist work,/g)).toHaveLength(1)
     const resources=productionAssignmentPrompt(f.run,{stage:'resources',stopAfter:'resources',originRequestKey:'start'})
-    expect(resources).toContain('$game-content-pipeline-engineer')
+    expect(resources).not.toMatch(/\$[A-Za-z][A-Za-z0-9_-]*/)
     for (const context of [visual, resources, implementation]) {
       expect(context).not.toContain('authorized cost')
       expect(context).not.toContain('charge authorization')
@@ -151,17 +167,18 @@ test('design guidance leaves content choices within scope without forcing a Skil
     expect(implementation).not.toContain('existing progress record')
     expect(implementation).not.toContain('Diagnose product, environment and driver failures')
     expect(implementation).not.toContain('whole-game driver')
-    expect(implementation).toContain('Choose implementation and verification methods for the required behavior, adopted visual treatment and affected risks')
-    expect(implementation).toContain('Implement the confirmed scope and the design decisions needed to realize it')
-    expect(implementation).toContain('Adjust provisional tuning to realize the required behavior')
+    expect(implementation).not.toContain('Choose implementation and verification methods for the required behavior, adopted visual treatment and affected risks')
+    expect(implementation).toContain('Production and implementation choices belong to this assignment')
+    expect(implementation).toContain('an implementation defect does not redefine the required result')
     expect(implementation).not.toContain('settled product decisions')
-    expect(implementation).toContain('Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested.')
+    expect(implementation).not.toContain('Alternative cosmetic preferences')
+    expect(implementation).toContain('user-specified and selected visual designs, including their composition, subject proportions and spatial relationships')
+    expect(implementation).not.toContain('confirmed targets and adopted designs')
     expect(implementation).toContain('Judge remaining work against those requirements and repair observed deviations')
-    expect(implementation).toContain('current inputs')
+    expect(implementation).toContain('existing work')
     expect(implementation).toContain('any remaining defects, unverified behavior or external blockers')
     expect(implementation).not.toContain('game-quality acceptance')
     expect(implementation).not.toContain('not certification')
-    expect(implementation).toContain('Reuse relevant sources and observations still valid for the current inputs')
   }finally{await f.close()}
 })
 
@@ -421,6 +438,14 @@ test('in-task visual selection retains immutable reference bytes without advanci
     const evidence = selectedProductionVisualSources(f.run)
     expect(evidence).toEqual(selected.sources)
     expect(selectedProductionVisualSources(JSON.parse(JSON.stringify(f.run)))).toEqual(evidence)
+    const restored=JSON.parse(JSON.stringify(f.run)) as Run
+    restored.agentTurns![0]!.status='interrupted'
+    restored.agentTurns!.push({...turn,attemptId:'resumed-author',visualSelection:undefined})
+    const prompt=productionAssignmentPrompt(restored,turn.production)
+    expect(prompt).toContain('docs/look.png')
+    expect(prompt).toContain('user-specified and selected visual designs, including their composition, subject proportions and spatial relationships')
+    expect(prompt).not.toContain('Alternative cosmetic preferences')
+    expect(selectedProductionVisualSources(restored)).toEqual(evidence)
     const added = prepareProductionHandoff(f.run, turn, {action:'select-visual',summary:'Add the UI treatment',sections:['Space'],files:['docs/ui.png']})
     expect(added.sources.slice(0, selected.sources.length)).toEqual(selected.sources)
     expect(added.sources.map(source => source.path)).toEqual(['docs/look.png','docs/ui.png'])
@@ -429,44 +454,47 @@ test('in-task visual selection retains immutable reference bytes without advanci
     await writeFile(join(f.root, 'docs/look.png'), 'replaced target bytes')
     expect(() => prepareProductionHandoff(f.run, turn, {action:'select-visual',summary:'Attempt replacement',sections:[],files:['docs/look.png']})).toThrow('source bytes changed')
     expect(() => prepareProductionHandoff(f.run, turn, {action:'select-visual',summary:'Not an image target',sections:[],files:['docs/GDD.md']})).toThrow('design images')
-    expect(() => prepareProductionHandoff(f.run, f.turn, {action:'select-visual',summary:'Outside production',sections:[],files:['docs/ui.png']})).toThrow('current implementation/resource task')
+    expect(() => prepareProductionHandoff(f.run, {...f.turn,production:{stage:'verification',originRequestKey:'start'}}, {action:'select-visual',summary:'Verifier cannot select',sections:[],files:['docs/ui.png']})).toThrow('current design/implementation/resource task')
   } finally { await f.close() }
 })
 
 
-test('complete games start with GDD and hand off directly to implementation; saved implementation tasks still resume',async()=>{
+test('complete games keep design and implementation with one author; saved design tasks retain their boundary',async()=>{
   const f=await fixture()
   try {
     f.run.creation={initialDelivery:'complete-game',editableContent:false}
+    f.run.agentTurns=[]
     await rm(join(f.root,'docs/GDD.md'))
     const initial=initialProductionAssignment(f.run)!
-    expect(initial).toEqual({stage:'design',originRequestKey:'start',stopAfter:'implementation'})
-    expect(nextProductionStage(f.run)).toBe('design')
-    const prompt=productionAssignmentPrompt(f.run,initial)
-    expect(prompt).toContain('Choose the content, structure and depth')
-    expect(prompt).toContain('not game code or assets')
-    f.run.agentTurns=[{...f.turn,production:initial,status:'interrupted',quiescedAt:new Date().toISOString()}]
-    expect(messageProductionAssignment(f.run,'resume')).toEqual(initial)
-    expect(()=>prepareProductionHandoff(f.run,f.turn,{action:'implement',summary:'Too early',sections:[],files:[]})).toThrow('production stages use advance')
-    await writeFile(join(f.root,'docs/GDD.md'),f.source)
-    const handoff={...prepareDesignDocumentHandoff(f.root,'Reviewed GDD'),next:{...initial,stage:'implementation' as const}}
-    f.run.agentTurns=[{...f.turn,production:initial,status:'ended',quiescedAt:new Date().toISOString(),productionHandoff:handoff}]
+    expect(initial).toEqual({stage:'implementation',originRequestKey:'start'})
     expect(nextProductionStage(f.run)).toBe('implementation')
-    expect(messageProductionAssignment(f.run,'implement')).toEqual(handoff.next)
+    expect(isContinuousGameAuthor(f.run,initial)).toBe(true)
+    const prompt=productionAssignmentPrompt(f.run,initial)
+    expect(prompt).toContain('one continuous authoring task')
+    expect(prompt).toContain('record the resulting decisions in docs/GDD.md')
+    expect(prompt).toContain('choosing its content, structure and depth')
+    expect(prompt).not.toContain('does not produce game code or runtime assets')
+    expect(productionAssignmentBaseInstructions(f.run,initial)).toBeUndefined()
+    expect(productionOutputSchema(initial)).toHaveProperty('properties.summary')
+    for(const status of ['running','interrupted','failed','ended'] as const) {
+      f.run.agentTurns=[{...f.turn,production:initial,status,quiescedAt:new Date().toISOString()}]
+      expect(messageProductionAssignment(f.run,'resume',true)).toEqual(initial)
+      expect(isContinuousGameAuthor(f.run,initial)).toBe(true)
+    }
+    await writeFile(join(f.root,'docs/GDD.md'),f.source)
+    const handoff=prepareDesignDocumentHandoff(f.root,'Game and current decisions')
+    f.run.agentTurns=[{...f.turn,production:initial,status:'ended',quiescedAt:new Date().toISOString(),productionHandoff:handoff}]
+    expect(handoff.next).toBeUndefined()
+    expect(nextProductionStage(f.run)).toBe('implementation')
     verifyProductionHandoff(f.root,handoff)
     await writeFile(join(f.root,'docs/GDD.md'),f.source+'Changed decision.\n')
     expect(()=>verifyProductionHandoff(f.root,handoff)).toThrow('source changed')
-    await rm(join(f.root,'docs/GDD.md'))
-    const retained={stage:'implementation' as const,originRequestKey:'start',stopAfter:'implementation' as const}
-    for(const status of ['running','interrupted','failed','ended'] as const) {
-      f.run.agentTurns=[{...f.turn,production:retained,status,quiescedAt:new Date().toISOString()}]
-      expect(nextProductionStage(JSON.parse(JSON.stringify(f.run)))).toBe('implementation')
-      expect(messageProductionAssignment(f.run,'resume',true)).toEqual(retained)
-    }
-    expect(productionAssignmentPrompt(f.run,retained)).not.toContain('a separate GDD document and review are not prerequisites')
+    const oldDesign={stage:'design' as const,originRequestKey:'start',stopAfter:'implementation' as const}
+    f.run.agentTurns=[{...f.turn,production:oldDesign,status:'interrupted'}]
+    expect(messageProductionAssignment(f.run,'resume',true)).toEqual(oldDesign)
+    expect(isContinuousGameAuthor(f.run,initial)).toBe(false)
     f.run.creation.initialDelivery='design-led-first-version'
-    f.run.agentTurns=[{...f.turn,production:initial,status:'interrupted'}]
-    expect(messageProductionAssignment(f.run,'resume')).toEqual(initial)
+    expect(initialProductionAssignment(f.run)).toEqual(oldDesign)
     delete f.run.creation
     f.run.agentTurns=[]
     expect(initialProductionAssignment(f.run)).toEqual({stage:'design',originRequestKey:'start'})
@@ -479,13 +507,13 @@ test('new and archived implementations leave verification and completion to the 
     const legacy={stage:'implementation' as const,originRequestKey:'start',browserVerification:1 as const}
     const before=JSON.stringify(legacy)
     const prompt=productionAssignmentPrompt(f.run,legacy)
-    expect(prompt).toContain('Choose implementation and verification methods')
+    expect(prompt).toContain('Production and implementation choices belong to this assignment')
     expect(prompt).toContain('Finish this native turn with the result')
     expect(prompt).not.toMatch(/verification:\{|top-level checks|frozen check|host browser|status:\"ready\"|script source must match/i)
     expect(productionAssignmentFacts(f.run,legacy)).not.toHaveProperty('browserVerification')
     expect(JSON.stringify(legacy)).toBe(before)
     expect(initialProductionAssignment({...f.run,productionWorkflow:1,creation:{initialDelivery:'complete-game',editableContent:false}}))
-      .toEqual({stage:'design',originRequestKey:f.run.requestKey,stopAfter:'implementation'})
+      .toEqual({stage:'implementation',originRequestKey:f.run.requestKey})
   }finally{await f.close()}
 })
 
@@ -509,4 +537,175 @@ test('design input binds complete UTF-8 bytes and identity without relaxing sour
     await symlink('../outside.md',join(f.root,'docs/GDD.md'))
     expect(()=>designDocumentSnapshot(f.root)).toThrow('symlink')
   }finally{await f.close()}
+})
+
+
+test('native preparation schemas have strict root objects for initial, revision and answer-only tasks', () => {
+  const strictObject = (schema: any) => {
+    if(schema.type==='object') {
+      expect(schema.additionalProperties).toBe(false)
+      expect([...schema.required].sort()).toEqual(Object.keys(schema.properties).sort())
+      for(const property of Object.values(schema.properties))strictObject(property)
+    }
+    if(schema.items)strictObject(schema.items)
+  }
+  for(const stage of ['design','visual','resources'] as const)for(const answer of [false,true]) {
+    const schema=productionOutputSchema({stage,originRequestKey:'synthetic'},answer)
+    expect(schema.type).toBe('object')
+    expect(schema).not.toHaveProperty('anyOf')
+    expect((schema.properties!.status as any).enum).toEqual(answer?['ready','blocked','answered']:['ready','blocked'])
+    strictObject(schema)
+  }
+})
+
+
+test('isolated verification reuses source handoffs without changing archived implementations or adding project reports',async()=>{
+  const f=await fixture()
+  try {
+    f.run.creation={initialDelivery:'complete-game',editableContent:false,verification:'isolated'}
+    const author={...f.turn,status:'ended' as const,quiescedAt:new Date().toISOString(),requirementsRevision:f.run.requirements.revision,
+      production:{stage:'implementation' as const,originRequestKey:f.run.requestKey}}
+    f.run.agentTurns=[author]
+    const handoff=implementationVerificationHandoff(f.run,author,'Actual runnable output and known limits')
+    expect(handoff.sources).toEqual([])
+    expect(handoff.request.files).toEqual([])
+    expect(handoff.next).toMatchObject({stage:'verification',verificationOf:author.attemptId})
+    expect(verificationImplementation(f.run,handoff.next!)).toBe(author)
+    expect(()=>verificationImplementation(f.run,{...handoff.next!,verificationOf:'foreign'})).toThrow('settled implementation')
+    expect(productionAssignmentBaseInstructions(f.run,author.production)).toContain('The separate verification assignment owns the systematic gameplay')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).toContain('Do not edit game sources')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).toContain('Use each tool’s configured output location')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).not.toContain('temporary directory for any needed scripts or test output')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).toContain('collecting reproducible product defects for the author')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).toContain('Provisional tuning is not a precision acceptance threshold')
+    expect(productionAssignmentBaseInstructions(f.run,author.production)).toContain('checks actually performed with their conditions and outcomes')
+    expect(productionAssignmentBaseInstructions(f.run,author.production)).toContain('readiness does not require creating a report')
+    expect(productionAssignmentBaseInstructions(f.run,author.production)).toContain('including adopted presentation and feedback')
+    expect(productionAssignmentBaseInstructions(f.run,author.production)).toContain('unimplemented adopted decisions')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).toContain('rather than inferring completion from object or control presence')
+    expect(productionAssignmentBaseInstructions(f.run,handoff.next!)).toContain('Ordinary aesthetic alternatives within a satisfied treatment are not product defects')
+    expect(productionAssignmentPrompt(f.run,handoff.next!)).not.toContain('DESIGN_BODY_ONLY_WHEN_READ')
+    expect(productionAssignmentPrompt(f.run,author.production)).not.toContain('Deliver the runnable implementation for independent verification')
+    expect(productionAssignmentPrompt(f.run,handoff.next!)).not.toContain('Return the final JSON result:')
+    expect(productionAssignmentBaseInstructions(f.run,{stage:'design',originRequestKey:f.run.requestKey})).toBeUndefined()
+    expect(productionAssignmentBaseInstructions({...f.run,creation:undefined},author.production)).toBeUndefined()
+    const inPlace=prepareProductionHandoff(f.run,{...author,status:'running'},{action:'implement',summary:'Current work',sections:[],files:[]})
+    expect(inPlace.next).toBeUndefined()
+    const ready=prepareProductionHandoff(f.run,{...author,status:'running'},{action:'advance',summary:'Runnable output; remaining checks belong to verification',sections:[],files:[]})
+    expect(ready.next).toMatchObject({stage:'verification',verificationOf:author.attemptId})
+    expect(ready.sources.map(s=>s.path)).toEqual(['docs/GDD.md'])
+    expect(productionAssignmentPrompt(f.run,author.production)).not.toContain('Observe player input through resulting feedback before expanding')
+    expect(inPlace.sources).toEqual([])
+    expect(implementationVerificationOutputSchema()).toMatchObject({type:'object',additionalProperties:false,required:['summary','observations']})
+    const observation={outcome:'Required player action',status:'passed',evidence:'Delivered input produced the expected visible result'}
+    expect(parseImplementationVerification({summary:'Required action observed',observations:[observation]}).status).toBe('passed')
+    const unverified={...observation,status:'unverified',evidence:'Only the stationary result was observed, not the required controlled action'}
+    expect(parseImplementationVerification({summary:'Not observed',observations:[unverified],externalBlocker:null},true).status).toBe('incomplete')
+    expect(parseImplementationVerification({summary:'Access unavailable',observations:[unverified],externalBlocker:'Required platform unavailable'},true).status).toBe('blocked')
+    const blocked=parseImplementationVerification({summary:'All checks passed',observations:[observation,unverified]})
+    expect(blocked.status).toBe('blocked')
+    expect(blocked.findings).toEqual([])
+    expect(blocked.summary).toContain('[unverified] Required player action: Only the stationary result')
+    const failed={...observation,status:'failed',evidence:'The delivered control did not move the player'}
+    const repair=parseImplementationVerification({summary:'One reproducible defect',observations:[failed,unverified]})
+    expect(repair.status).toBe('needs-repair')
+    expect(repair.findings).toEqual(['Required player action: The delivered control did not move the player'])
+    expect(repair.summary).toContain('[unverified]')
+    expect(()=>parseImplementationVerification({status:'passed',summary:'Unsupported verdict',findings:[]})).toThrow()
+    expect(()=>parseImplementationVerification({status:'passed',summary:'Override the observations',observations:[unverified]})).toThrow()
+    expect(()=>parseImplementationVerification({summary:'No observations',observations:[]})).toThrow()
+    expect(()=>parseImplementationVerification({summary:'No evidence',observations:[{...observation,evidence:' '}]})).toThrow()
+    expect(()=>parseImplementationVerification({summary:'Bad status',observations:[{...observation,status:'optional'}]})).toThrow()
+    expect(()=>parseImplementationVerification({summary:'Extra contract',observations:[observation],checks:[]})).toThrow()
+    f.run.agentTurns=[{...author,productionHandoff:handoff},{...author,attemptId:'verified',production:handoff.next!,implementationVerification:{status:'passed',summary:'Current path passed',findings:[]}}]
+    expect(nextProductionStage(f.run)).toBe('implementation')
+    delete f.run.creation.verification
+    expect(productionAssignmentPrompt(f.run,author.production)).toContain('Production and implementation choices belong to this assignment')
+    expect(()=>implementationVerificationHandoff(f.run,author,'No retroactive upgrade')).toThrow('no separate verification')
+  }finally{await f.close()}
+})
+
+test('explicit and native implementation handoffs require intact library delivery and retain the same source identities',async()=>{
+  const f=await fixture()
+  try {
+    f.run.requirements.text=JSON.stringify({kind:'confirmed_build_brief',idea:'Synthetic required library project',resource_library_usage:'required',
+      selected_option:{},settings:{engine:'React',resourceLibraryUsage:'required'},document_language:'en',game_user_visible_language:'en',agent_response_language:'en'})
+    f.run.creation={initialDelivery:'complete-game',editableContent:false,verification:'isolated'}
+    f.turn.production={stage:'implementation',originRequestKey:'start',stopAfter:'implementation'}
+    const ready={action:'advance',summary:'Synthetic runnable implementation',sections:[],files:[]}
+    const implicit=()=>implementationVerificationHandoff(f.run,f.turn,ready.summary)
+    const explicit=()=>prepareProductionHandoff(f.run,f.turn,ready)
+    expect(implicit).toThrow('resource_library_usage=required')
+    expect(explicit).toThrow('resource_library_usage=required')
+    const example=assetManifestAuthoringExamples().canonical,item=example.resources[0]!
+    await mkdir(join(f.root,'assets/runtime/example'),{recursive:true})
+    await writeFile(join(f.root,item.root_path),'{}')
+    const resource={id:item.id,fulfills:item.fulfills,root_path:item.root_path,file_paths:item.file_paths,
+      provisional:false,reason:'Synthetic library data',selection_reason:['Required resource need']}
+    const request={operation:'register',projectTarget:{...example.project_target!,resource_library_usage:'required'},requirements:example.requirements,resources:[resource]}
+    await produceResources(f.root,request,undefined,'required')
+    expect(implicit).toThrow('Required library resources have not been delivered')
+    const source={type:'resource-library',pack_id:'fixture-pack',pack_version:'1',element_id:'fixture-element',element_path:'data/item.json'}
+    const library={...resource,id:'library-data',source}
+    await produceResources(f.root,{operation:'register',resources:[{...library,provisional:true}]},undefined,'required')
+    expect(explicit).toThrow('Required library resources have not been delivered')
+    await produceResources(f.root,{operation:'register',resources:[library]},undefined,'required')
+    const a=implicit(),b=explicit()
+    for(const path of a.request.files)expect(b.request.files).toContain(path)
+    expect(a.request.files).toContain('assets/asset-manifest.json')
+    expect(a.request.files).toContain(item.root_path)
+    expect(a.sources.every(entry=>b.sources.some(other=>other.path===entry.path&&other.sha256===entry.sha256))).toBe(true)
+    expect(()=>verifyProductionHandoff(f.root,a)).not.toThrow()
+    await writeFile(join(f.root,item.root_path),'changed')
+    expect(implicit).toThrow('hash')
+    expect(()=>verifyProductionHandoff(f.root,a)).toThrow('source changed')
+    f.run.requirements.text='Historical plain-text goal'
+    expect(implicit().sources).toEqual([])
+  }finally{await f.close()}
+})
+
+
+test('workflow discovery describes only the current assignment without changing its handoff contract',()=>{
+  const task={originRequestKey:'fixture'}
+  for(const stage of ['design','visual','resources'] as const) {
+    const description=productionWorkflowToolDescription({...task,stage})
+    expect(description).toContain('final JSON contract')
+    expect(description).not.toContain('managed runtime URL')
+    expect(description).not.toContain('hands runnable implementation')
+  }
+  const verification=productionWorkflowToolDescription({...task,stage:'verification'})
+  expect(verification).toContain('read-only verification')
+  expect(verification).toContain('preview start/status')
+  expect(verification).not.toContain('advance')
+  expect(verification).not.toContain('select-visual')
+  const implementation=productionWorkflowToolDescription({...task,stage:'implementation'},true)
+  expect(implementation).toContain('advance hands runnable implementation')
+  expect(implementation).toContain('not a test verdict')
+  const ordinary=productionWorkflowToolDescription({...task,stage:'implementation'})
+  expect(ordinary).toContain('native completion')
+  expect(ordinary).not.toContain('advance')
+  expect(productionWorkflowToolDescription()).toContain('current user-authorized assignment')
+})
+
+
+test('design retains an explicitly selected picture before the document and carries its bytes without an extra stage', async () => {
+  const f=await fixture()
+  try {
+    await rm(join(f.root,'docs/GDD.md'))
+    await writeFile(join(f.root,'docs/treatment.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
+    const turn={...f.turn,production:{stage:'design' as const,originRequestKey:'start'}}
+    const selection=prepareProductionHandoff(f.run,turn,{action:'select-visual',summary:'Chosen treatment',sections:[],files:['docs/treatment.svg']})
+    expect(selection.next).toBeUndefined()
+    turn.visualSelection=selection
+    f.run.agentTurns=[turn]
+    await writeFile(join(f.root,'docs/GDD.md'),f.source)
+    const handoff=prepareDesignDocumentHandoff(f.root,'Experience recorded',selectedProductionVisualSources(f.run))
+    expect(handoff.request.files).toEqual(['docs/GDD.md','docs/treatment.svg'])
+    expect(handoff.sources.slice(1)).toEqual(selection.sources)
+    expect(handoff.next).toBeUndefined()
+    verifyProductionHandoff(f.root,handoff)
+    await writeFile(join(f.root,'docs/treatment.svg'),'<svg>changed</svg>')
+    expect(()=>prepareDesignDocumentHandoff(f.root,'Changed picture',selection.sources)).toThrow('Selected visual source bytes changed')
+    expect(()=>verifyProductionHandoff(f.root,handoff)).toThrow('source changed')
+  } finally {await f.close()}
 })

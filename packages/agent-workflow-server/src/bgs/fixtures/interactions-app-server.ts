@@ -18,7 +18,8 @@ createInterface({ input: process.stdin }).on('line', async line => {
   else if (request.method === 'model/list') reply({ data: [{ model: 'fixture-model', isDefault: true, defaultReasoningEffort: 'low',
     supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }] }] })
   else if (request.method === 'thread/start' || request.method === 'thread/resume') { reasoning = p.config?.model_reasoning_effort; reply({ thread: { id: threadId } }) }
-  else if (request.method === 'skills/extraRoots/set') reply({})
+  else if (request.method === 'marketplace/add') reply({installedRoot:p.source})
+  else if (request.method === 'plugin/read') reply({plugin:{summary:{installed:true,enabled:true},skills:[]}})
   else if (request.method === 'skills/list') reply({ data: [{ skills: [], errors: [] }] })
   else if (request.method === 'turn/start') {
     const turnId = 'turn-' + ++sequence

@@ -231,7 +231,7 @@ The user skills topology is also split:
 
 ```text
 browser -> beegame-runtime -> beegame-skills
-runtime turn startup -> beegame-skills -> materialized .runtime/app/skills/user-*
+runtime turn startup -> beegame-skills -> materialized .runtime/app/bgs/skills/user-*
 ```
 
 `beegame-runtime` proxies user skill list/import/toggle/delete requests to
@@ -342,10 +342,16 @@ Generated projects are stored in the `beegame-projects` Docker volume at
 Runtime config is stored in the `beegame-config` Docker volume at
 `/home/bun/.beegame`.
 
-The runtime image includes the read-only built-in Skill catalog at
-`/app/.beegame/skills/bgs-game-skills`. The native Agent discovers it separately
-from uploaded user Skills, which remain explicit per-user configuration managed
-by the skills service under `.beegame/skills/<user_id>`.
+The runtime image includes the BGS professional Plugin at `/app/.beegame/plugins/bgs-game-development`.
+Each isolated BGS runtime prepares it through native plugin installation before
+starting Agent work; it is not also registered as an extra Skills root. Existing
+plugin installations and explicit disable settings are preserved on resume.
+Native thread recovery retains the installed Plugin cache. The Plugin directory
+is the sole packaged source; no legacy source-path alias is created. Historical
+Shell source paths are not rewritten or granted additional sandbox access.
+Uploaded user Skills synchronize directly to that user's `BGS_HOME/skills`,
+separately from system Skills and the Plugin cache. The skills service retains
+user-owned storage; it does not load instructions into Agent context.
 
 ## Current Scope
 

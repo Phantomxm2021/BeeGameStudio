@@ -10,6 +10,10 @@
 !apps/frontend/**
 !apps/desktop/
 !apps/desktop/package.json
+!apps/game-portal/
+!apps/game-portal/package.json
+!apps/game-delivery/
+!apps/game-delivery/package.json
 !packages/
 !packages/**
 !docker/

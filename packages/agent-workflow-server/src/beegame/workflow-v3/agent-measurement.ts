@@ -35,7 +35,7 @@ export function agentSkillFacts(run:Run,turn:AgentTurn,liveUses?:SkillUse[]) {
   return {...priorMainSkillLoads(run,turn.attemptId),currentTurnUses,
     currentTurnEvidence:liveUses!==undefined?'live-skill-access-events':turn.skillUses!==undefined?'saved-skill-access-events':'not-recorded-yet',
     nativeInvocations:'not-exposed-by-app-server',
-    evidenceLimit:'Shell entries link catalog files to command events; inspect those events for execution status and exit code. Loader receipts and read commands are not native Skill invocation telemetry or proof of effective application. Neither full reading nor context retention is certified. Missing links do not establish no use.'}
+    evidenceLimit:'Shell entries index only files identified by native read metadata; commands without that metadata are not indexed. Inspect linked command events for execution status and exit code. Loader receipts and read commands are not native Skill invocation telemetry or proof of effective application. Neither full reading nor context retention is certified. Missing links do not establish no use.'}
 }
 
 function uiObservationFeedback(id:string, observation:string, compact = true) {

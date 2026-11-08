@@ -17,7 +17,7 @@ localTest('dependency caches stay outside test discovery and remain writable onl
   await writeFile(join(pack, 'package.json'), JSON.stringify({name:'bgs-cache-fixture',version:'1.0.0'}))
   await writeFile(join(pack, 'test/dependency.test.js'), 'throw new Error("DEPENDENCY_CACHE_TEST_MUST_NOT_RUN")')
   await writeFile(join(game, 'package.json'), JSON.stringify({name:'synthetic-game',private:true,
-    dependencies:{'bgs-cache-fixture':'file:./dependency.tgz'}}))
+    scripts:{'fixture-build':'node -e \"console.log(process.cwd())\"'},dependencies:{'bgs-cache-fixture':'file:./dependency.tgz'}}))
   await writeFile(join(game, 'game.test.js'), 'test("game smoke", () => { expect(1 + 1).toBe(2) })')
   const env = getSafeRuntimeProcessEnvironment()
   const run = async (command: string[], environment = env) => {
@@ -39,6 +39,8 @@ localTest('dependency caches stay outside test discovery and remain writable onl
     const sandbox = (command:string[]) => bgsCommand().concat('sandbox','-C',game,'-P','bgs-project',
       '-c','permissions.bgs-project='+toml(profile),'--',...command)
     const executionEnv = {...env,...access.environment}
+    // Bun must tolerate unreadable ancestors without opening the project boundary.
+    expect(await run(sandbox([process.execPath,'run','fixture-build']),executionEnv)).toContain(game)
     // Exercise actual Unix IPC in the production sandbox, without networking.
     await run(bgsCommand().concat('sandbox','-C',game,'-P','bgs-project',
       '-c','permissions.bgs-project='+toml(access.config.permissions['bgs-project']),
@@ -71,10 +73,12 @@ localTest('dependency caches stay outside test discovery and remain writable onl
     await writeFile(join(game,'permissions.cjs'), `
       const fs = require('node:fs');
       if (fs.readFileSync(${JSON.stringify(adapter)}, 'utf8') !== 'CURRENT_TOOL') throw Error('Current tool is not readable');
-      for (const operation of [() => fs.readFileSync(${JSON.stringify(hostRecord)}, 'utf8'),
+      for (const operation of [() => fs.readdirSync(${JSON.stringify(root)}),
+        () => fs.readFileSync(${JSON.stringify(join(pack,'package.json'))}, 'utf8'),
+        () => fs.readFileSync(${JSON.stringify(hostRecord)}, 'utf8'),
         () => fs.writeFileSync(${JSON.stringify(hostRecord)}, 'OVERWRITE')]) {
         let denied = false; try {operation()} catch {denied = true}
-        if (!denied) throw Error('Host record boundary was bypassed');
+        if (!denied) throw Error('Project read/write boundary was bypassed');
       }
       for (const name of ['XDG_CACHE_HOME','BUN_INSTALL_CACHE_DIR','NPM_CONFIG_CACHE']) {
         fs.mkdirSync(process.env[name], {recursive:true});
@@ -163,7 +167,7 @@ localTest('development file watching observes source writes under the actual nat
         await writeFile('source.js','export default "after";');
         await new Promise(resolve=>setTimeout(resolve,1000));
         const after=await server.transformRequest('/source.js');
-        console.log(JSON.stringify({observed,before:before.code.includes('"before"'),after:after.code.includes('"after"'),useFsEvents:server.watcher.options.useFsEvents}));
+        console.log(JSON.stringify({observed,before:before.code.includes('"before"'),after:after.code.includes('"after"'),useFsEvents:server.watcher.options.useFsEvents,sandbox:process.env.CODEX_SANDBOX}));
       } finally {await server.close();}
     `)
     profile.filesystem[modules]='read'
@@ -173,6 +177,42 @@ localTest('development file watching observes source writes under the actual nat
     const viteChild=Bun.spawn(viteCommand,{cwd:game,env:{...env,...access.environment,BGS_VITE_CACHE_DIR:join(access.environment.XDG_CACHE_HOME!,'vite')},stdout:'pipe',stderr:'pipe'})
     const [viteCode,viteOut,viteErr]=await Promise.all([viteChild.exited,new Response(viteChild.stdout).text(),new Response(viteChild.stderr).text()])
     expect(viteCode,viteOut+viteErr).toBe(0)
-    expect(JSON.parse(viteOut.trim().split('\n').at(-1)!)).toEqual({observed:true,before:true,after:true,useFsEvents:false})
+    expect(JSON.parse(viteOut.trim().split('\n').at(-1)!)).toEqual({observed:true,before:true,after:true,useFsEvents:false,...(process.platform==='darwin'?{sandbox:'seatbelt'}:{})})
   }finally{await access?.close();await rm(output,{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+},15000)
+
+
+localTest('native document authoring writes docs while source, control files and verification remain read-only',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-native-docs-'))),game=join(root,'game')
+  await mkdir(join(game,'assets/manifest'),{recursive:true})
+  await writeFile(join(game,'AGENTS.md'),'HOST_GUIDE')
+  await writeFile(join(game,'source.js'),'SOURCE')
+  await writeFile(join(game,'assets/asset-manifest.json'),'REGISTRY')
+  const env=getSafeRuntimeProcessEnvironment()
+  let author:Awaited<ReturnType<typeof projectExecutionAccess>>|undefined
+  let verifier:typeof author
+  const run=async(access:NonNullable<typeof author>,code:string,review=false)=>{
+    const profile={...access.config.permissions[review?'bgs-project-review':'bgs-project'],network:{enabled:false}}
+    const child=Bun.spawn(bgsCommand().concat('sandbox','-C',game,'-P','bgs-project',
+      '-c','permissions.bgs-project='+toml(profile),'--',Bun.which('node')!,'-e',code),
+      {cwd:game,env:{...env,...access.environment},stdout:'pipe',stderr:'pipe'})
+    const [status,out,error]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()])
+    expect(status,out+error).toBe(0)
+  }
+  try {
+    author=await projectExecutionAccess({workspacePath:game,sessionId:'author',environment:env,readOnly:true,documentPath:'docs/GDD.md'})
+    await run(author,`const fs=require('node:fs');fs.writeFileSync('docs/GDD.md','FIRST');fs.writeFileSync('docs/draft.tmp','REVISED');fs.renameSync('docs/draft.tmp','docs/GDD.md');
+      for(const path of ['source.js','AGENTS.md','assets/asset-manifest.json']){let denied=false;try{fs.writeFileSync(path,'BAD')}catch{denied=true}if(!denied)throw Error('Unexpected write: '+path)}`)
+    expect(await readFile(join(game,'docs/GDD.md'),'utf8')).toBe('REVISED')
+    const rejectWrite=`let denied=false;try{require('node:fs').writeFileSync('docs/GDD.md','BAD')}catch{denied=true}if(!denied)throw Error('Read-only scope allowed document changes')`
+    await run(author,rejectWrite,true)
+    verifier=await projectExecutionAccess({workspacePath:game,sessionId:'verifier',environment:env,readOnly:true})
+    await run(verifier,rejectWrite)
+    await author.close();author=await projectExecutionAccess({workspacePath:game,sessionId:'author',environment:env,readOnly:true,documentPath:'docs/GDD.md'})
+    await run(author,`require('node:fs').appendFileSync('docs/GDD.md',' RESUMED')`)
+    expect(await readFile(join(game,'docs/GDD.md'),'utf8')).toBe('REVISED RESUMED')
+    expect(await readFile(join(game,'source.js'),'utf8')).toBe('SOURCE')
+    expect(await readFile(join(game,'AGENTS.md'),'utf8')).toBe('HOST_GUIDE')
+    expect(await readFile(join(game,'assets/asset-manifest.json'),'utf8')).toBe('REGISTRY')
+  }finally{await author?.close();await verifier?.close();await rm(nativeSessionOutputPath(game,'author'),{recursive:true,force:true});await rm(nativeSessionOutputPath(game,'verifier'),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },15000)

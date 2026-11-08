@@ -10,11 +10,13 @@ import {
   nativeTheme,
   net,
   protocol,
+  safeStorage,
 } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { DEV_RENDERER_URL, getRendererUrl, getTrustedOrigins } from './config'
 import { serveBundledRenderer } from './bundledRenderer'
+import { startLocalRuntime, type LocalRuntime } from './localRuntime'
 import {
   captureWindowBounds,
   clampWindowBounds,
@@ -24,6 +26,8 @@ import {
   sanitizeFileName,
 } from './security'
 
+let localRuntime: LocalRuntime | undefined
+let quitting = false
 let mainWindow: BrowserWindow | null = null
 let creatingWindow = false
 let rendererUrl = ''
@@ -332,6 +336,15 @@ if (!gotLock) {
     event.preventDefault()
     queueOAuthCallback(value)
   })
+  app.on('before-quit', event => {
+    if (!localRuntime || quitting) return
+    event.preventDefault()
+    quitting = true
+    void localRuntime.stop().then(() => app.quit(), error => {
+      quitting = false
+      dialog.showErrorBox('Local BGS could not stop', error instanceof Error ? error.message : String(error))
+    })
+  })
   void app
     .whenReady()
     .then(async () => {
@@ -349,6 +362,15 @@ if (!gotLock) {
           request, path.join(process.resourcesPath, 'frontend'),
           (input, init) => net.fetch(input, init),
         ))
+      }
+      if (app.isPackaged && rendererUrl === DEV_RENDERER_URL) {
+        localRuntime = await startLocalRuntime(process.resourcesPath, app.getPath('userData'), safeStorage)
+        void localRuntime.closed.then(result => {
+          if (!quitting) dialog.showErrorBox('Local BGS runtime stopped',
+            `Exit: ${result.code ?? result.signal}. Restart Bee Game Studio. See runtime.log in the application data directory.`)
+        }, error => {
+          if (!quitting) dialog.showErrorBox('Local BGS runtime failed', error instanceof Error ? error.message : String(error))
+        })
       }
       configureIpc()
       configureNavigation()

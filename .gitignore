@@ -39,8 +39,6 @@ Claude-Haiku-*.txt
 
 # Agent / tool state dirs
 .swarm/
-.beegame/skills/*/
-!.beegame/skills/bgs-game-skills/
 .agents/__pycache__/
 
 # Python bytecode
@@ -75,3 +73,12 @@ dist-vite/
 
 # BGS source runtime configuration (operator tools retain their own ignore rules)
 .bgs/
+
+# Versioned native marketplace bundled with the BGS professional Plugin
+!.beegame/plugins/bgs-game-development/.agents/
+!.beegame/plugins/bgs-game-development/.agents/plugins/
+!.beegame/plugins/bgs-game-development/.agents/plugins/marketplace.json
+
+# Desktop production runtime artifact prepared by the existing Forge package hook
+/apps/desktop/runtime/
+/apps/desktop/.runtime-package-*/

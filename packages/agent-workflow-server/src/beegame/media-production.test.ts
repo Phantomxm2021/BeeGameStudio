@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
@@ -176,7 +176,7 @@ test('invalid regions, duplicate normalized names, size and filtering fail befor
 test('output collision rolls back only newly created pair and preserves existing bytes', async () => {
   const root = await fixture()
   await writeFile(join(root, atlas.metadata), 'keep')
-  await expect(produceMedia(root, atlas, sharp)).rejects.toThrow('EEXIST')
+  await expect(produceMedia(root, atlas, sharp)).rejects.toThrow('Existing media differs')
   expect(await readFile(join(root, atlas.metadata), 'utf8')).toBe('keep')
   expect(await readdir(join(root, 'assets'))).not.toContain('sheet.png')
 })
@@ -205,6 +205,8 @@ test('input/output traversal and symlinks cannot escape the project', async () =
 test('deployed thin entry uses the installed dependency closure without package installs', async () => {
   const root = await fixture()
   const runtime = await sharedContentChecker(), media = await sharedSharp()
+  expect(Object.keys(await import(runtime.moduleUrl)).sort()).toEqual(['runMediaProductionCli','runResourceProductionCli'])
+  expect(await readFile(runtime.path,'utf8')).not.toContain('runGameContentCli')
   expect(media.roots).toHaveLength(1)
   expect(media.roots[0]).not.toContain('claude-code-main')
   await writeFile(join(root, 'media.mjs'), MEDIA_PRODUCTION_ENTRY)
@@ -215,6 +217,14 @@ test('deployed thin entry uses the installed dependency closure without package 
   const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
   expect({ code, error }).toEqual({ code: 0, error: '' })
   expect(JSON.parse(output)).toMatchObject({ valid: true, frameCount: 2 })
+  await writeFile(join(root,'request.json'),JSON.stringify({operation:'atlas-frames',input:atlas.output,
+    output:'assets/runtime/intact.png',frames:{red:{x:1,y:1,w:6,h:4},blue:{x:1,y:7,w:6,h:4}}}))
+  const intact=Bun.spawn([process.execPath,'media.mjs','request.json'],{cwd:root,
+    env:{...process.env,BEEGAME_CONTENT_CHECKER_MODULE:runtime.moduleUrl,BEEGAME_SHARP_MODULE:media.moduleUrl},stdout:'pipe',stderr:'pipe'})
+  const intactOutput=await new Response(intact.stdout).text(),intactError=await new Response(intact.stderr).text()
+  expect(await intact.exited,intactError||intactOutput).toBe(0)
+  expect(JSON.parse(intactOutput)).toMatchObject({operation:'atlas-frames',file_paths:['assets/runtime/intact.png','assets/runtime/intact.json'],width:8,height:12})
+  expect(await readFile(join(root,'assets/runtime/intact.png'))).toEqual(await readFile(join(root,atlas.output)))
   const before = (await readdir(join(root, 'assets'))).sort()
   await writeFile(join(root, 'request.json'), JSON.stringify({ operation: 'inspect', inputs: [{ input: atlas.output }] }))
   const inspection = Bun.spawn([process.execPath, 'media.mjs', 'request.json'], { cwd: root,
@@ -247,4 +257,49 @@ test('alpha inspection distinguishes transparent holes and opaque coverage in th
   await produceMedia(root,{operation:'images',jobs:[{input:'assets/runtime/far.png',output:'assets/covered.png',
     overlays:[{input:'assets/runtime/near.png',left:0,top:0}]}]},sharp)
   expect([...await sharp(join(root,'assets/covered.png')).ensureAlpha().raw().toBuffer()]).toEqual([255,0,0,255,255,0,0,255])
+})
+
+
+test('intact atlas frames preserve source bytes, real consumer regions and reusable acquisition facts',async()=>{
+  const root=await fixture()
+  await mkdir(join(root,'assets/runtime'))
+  const bytes=await readFile(join(root,'assets/red.png'))
+  const request={operation:'atlas-frames',input:'assets/red.png',output:'assets/runtime/regions.png',
+    frames:{left:{x:0,y:0,w:3,h:4},right:{x:3,y:0,w:3,h:4}}}
+  const result=await produceMedia(root,request,sharp)
+  expect(result).toMatchObject({valid:true,operation:'atlas-frames',path:request.output,
+    file_paths:['assets/runtime/regions.png','assets/runtime/regions.json'],width:6,height:4,frameCount:2})
+  expect(result).not.toHaveProperty('source')
+  expect(await readFile(join(root,request.output))).toEqual(bytes)
+  const metadata=JSON.parse(await readFile(join(root,'assets/runtime/regions.json'),'utf8'))
+  expect(spriteSheetSelection(parseSpriteSheet(metadata),{frame:'right'}).frame).toEqual({x:3,y:0,width:3,height:4})
+  expect(await produceMedia(root,request,sharp)).toEqual(result)
+  await unlink(join(root,'assets/runtime/regions.json'))
+  expect(await produceMedia(root,request,sharp)).toEqual(result)
+  expect(await readFile(join(root,request.output))).toEqual(bytes)
+  await expect(produceMedia(root,{...request,frames:{different:{x:0,y:0,w:6,h:4}}},sharp)).rejects.toThrow('Existing media differs')
+  expect(await readFile(join(root,'assets/red.png'))).toEqual(bytes)
+  expect(await readFile(join(root,'assets/runtime/regions.json'),'utf8')).toBe(JSON.stringify(metadata,null,2)+'\n')
+})
+
+test('intact atlas frame boundaries reject invalid, overlapping and escaped inputs without output',async()=>{
+  const root=await fixture(),outside=await fixture()
+  await mkdir(join(root,'assets/runtime'))
+  await symlink(join(outside,'assets'),join(root,'assets/external'))
+  const request={operation:'atlas-frames',input:'assets/red.png',output:'assets/runtime/rejected.png',frames:{one:{x:0,y:0,w:3,h:4}}}
+  for(const invalid of [
+    {...request,frames:{}},
+    {...request,frames:[{id:'one',x:0,y:0,w:3,h:4}]},
+    {...request,frames:{one:{frame:{x:0,y:0,w:3,h:4}}}},
+    {...request,frames:{one:{x:.5,y:0,w:3,h:4}}},
+    {...request,frames:{one:{x:0,y:0,w:0,h:4}}},
+    {...request,frames:{one:{x:4,y:0,w:3,h:4}}},
+    {...request,frames:{'bad name':{x:0,y:0,w:3,h:4}}},
+    {...request,frames:{one:{x:0,y:0,w:4,h:4},two:{x:3,y:0,w:3,h:4}}},
+    {...request,input:'assets/external/red.png'},
+    {...request,output:'assets/../../outside.png'},
+    {...request,output:'assets/external/output.png'},
+  ])await expect(produceMedia(root,invalid,sharp)).rejects.toThrow()
+  expect((await readdir(join(root,'assets/runtime')))).not.toContain('rejected.png')
+  expect((await readdir(join(root,'assets/runtime')))).not.toContain('rejected.json')
 })

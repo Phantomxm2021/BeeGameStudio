@@ -78,7 +78,7 @@ test('owned saved connection test and native MCP relay use stored headers withou
     expect(result.status).toBe(200)
     expect(await result.json()).toMatchObject({ok:true})
     expect(requests).toBe(1)
-    prepared=await prepareNativeMcpConfig({[NATIVE_MCP_CONFIG_ENV]:JSON.stringify([{...server,id:'remote'}])},root,undefined,undefined,{resolveOutboundTarget})
+    prepared=await prepareNativeMcpConfig({[NATIVE_MCP_CONFIG_ENV]:JSON.stringify([{...server,id:'remote'}])},root,undefined,{inspectOutboundTarget: async (value) => ({approved: true, target: await resolveOutboundTarget(value)})})
     expect(JSON.stringify(prepared.config)).not.toContain('fixture-private-key')
     const config=(prepared.config.mcp_servers as any)['bgs-remote']
     const response=await fetch(config.url,{method:'POST',headers:{...config.http_headers,'content-type':'application/json',authorization:'Bearer spoof'},body:JSON.stringify({id:2,method:'initialize'})})

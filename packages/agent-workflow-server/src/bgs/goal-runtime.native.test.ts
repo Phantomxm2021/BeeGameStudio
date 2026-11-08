@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -88,7 +89,8 @@ nativeTest(
   async () => {
     const root = await mkdtemp('/private/tmp/bgs-native-goal-runtime-')
     const workspace = join(root, 'game')
-    const catalog = join(root, 'skills')
+    const catalog = join(root, 'plugin-source', 'bgs-game-skills')
+    await mkdir(catalog,{recursive:true})
     const config = join(root, 'config')
     await mkdir(join(workspace, 'docs'), { recursive: true })
     await initializeProjectGuide(workspace)
@@ -189,7 +191,7 @@ nativeTest(
         },
         env: {
           BEEGAME_CONFIG_DIR: config,
-          BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+          BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           OPENAI_API_KEY: 'synthetic-local-only',
           OPENAI_BASE_URL: server.url.origin + '/v1',
           BEEGAME_MODEL: 'native-goal-fixture-model',
@@ -311,7 +313,8 @@ nativeTest(
   async () => {
     const root = await mkdtemp('/private/tmp/bgs-native-goal-cold-resume-')
     const workspace = join(root, 'game')
-    const catalog = join(root, 'skills')
+    const catalog = join(root, 'plugin-source', 'bgs-game-skills')
+    await mkdir(catalog,{recursive:true})
     const config = join(root, 'config')
     await mkdir(join(workspace, 'docs'), { recursive: true })
     await mkdir(join(catalog, 'fixture'), { recursive: true })
@@ -413,6 +416,7 @@ nativeTest(
       },
     })
 
+    await writeFixturePlugin(catalog)
     const env = () => ({
       BEEGAME_CONFIG_DIR: config,
       BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
@@ -753,7 +757,8 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
   `BGS assignment reaches real native ${outcome}, preserves scope and releases the writer without another dispatch`,
   async () => {
     const root = await mkdtemp('/private/tmp/bgs-assignment-handoff-')
-    const workspace = join(root, 'game'), catalog = join(root, 'skills'), config = join(root, 'config')
+    const workspace = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills'), config = join(root, 'config')
+    await mkdir(catalog,{recursive:true})
     await mkdir(workspace); await mkdir(join(catalog, 'fixture'), { recursive: true })
     await initializeProjectGuide(workspace)
     await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline execution fixture.\n---\nRead only when needed.\n')
@@ -774,7 +779,7 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
       return {url,addresses:['127.0.0.1'],lookup:(_host,_options,callback)=>callback(null,'127.0.0.1',4)}
     }})
     const sessions=new BeeGameSessionManager(runner,root,async()=>({
-      BEEGAME_CONFIG_DIR:config,BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:catalog,
+      BEEGAME_CONFIG_DIR:config,BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:await writeFixturePlugin(catalog),
       BEEGAME_MODEL_BILLING_SOURCE:'byok',BEEGAME_MODEL:'offline-assignment-model',
       OPENAI_API_KEY:'fixture-only',OPENAI_BASE_URL:server.url.origin+'/v1',
     }),{},true)
@@ -834,7 +839,8 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
 
 nativeTest('ordinary implementation verifies actual input and ends without BGS receipts or submission',async()=>{
   const root=await mkdtemp('/private/tmp/bgs-native-delivery-')
-  const workspace=join(root,'project'),catalog=join(root,'skills'),config=join(root,'config')
+  const workspace=join(root,'project'),catalog=join(root, 'plugin-source', 'bgs-game-skills'),config=join(root,'config')
+  await mkdir(catalog,{recursive:true})
   await mkdir(workspace);await mkdir(join(catalog,'fixture'),{recursive:true});await initializeProjectGuide(workspace)
   await writeFile(join(catalog,'fixture/SKILL.md'),'---\nname: fixture\ndescription: Offline execution fixture.\n---\nRead only when needed.\n')
   await writeFile(join(workspace,'input.txt'),'expected')
@@ -854,7 +860,7 @@ nativeTest('ordinary implementation verifies actual input and ends without BGS r
     const url=new URL(value);if(url.origin!==server.url.origin)throw Error('Offline endpoint only')
     return {url,addresses:['127.0.0.1'],lookup:(_host,_options,cb)=>cb(null,'127.0.0.1',4)}
   }})
-  const sessions=new BeeGameSessionManager(runner,root,async()=>({BEEGAME_CONFIG_DIR:config,BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:catalog,
+  const sessions=new BeeGameSessionManager(runner,root,async()=>({BEEGAME_CONFIG_DIR:config,BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:await writeFixturePlugin(catalog),
     BEEGAME_MODEL_BILLING_SOURCE:'byok',BEEGAME_MODEL:'offline-delivery-fixture',OPENAI_API_KEY:'fixture-only',OPENAI_BASE_URL:server.url.origin+'/v1'}),{},true)
   const store=createLocalWorkflowStore(join(root,'store')),executor=createAgentGoalExecutor({store,sessions})
   const session=sessions.start({workspacePath:workspace,projectId:'fixture',userId:'owner',userDataRoot:config})
@@ -889,7 +895,8 @@ nativeTest('ordinary implementation verifies actual input and ends without BGS r
 },30000)
 
 nativeTest('complete-game reviews GDD before native implementation with optional visuals and no Goal',async()=>{
-  const root=await mkdtemp('/private/tmp/bgs-native-production-'),workspace=join(root,'project'),config=join(root,'config'),catalog=join(root,'skills')
+  const root=await mkdtemp('/private/tmp/bgs-native-production-'),workspace=join(root,'project'),config=join(root,'config'),catalog=join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(join(workspace,'assets'),{recursive:true});await mkdir(join(catalog,'fixture'),{recursive:true})
   await writeFile(join(catalog,'fixture/SKILL.md'),'---\nname: fixture\ndescription: Offline visual selection transport fixture.\n---\nFixture only.\n')
   await writeFile(join(workspace,'assets/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>')
@@ -912,7 +919,7 @@ nativeTest('complete-game reviews GDD before native implementation with optional
     const url=new URL(value);if(url.origin!==server.url.origin)throw Error('Offline endpoint only')
     return {url,addresses:['127.0.0.1'],lookup:(_host,_options,cb)=>cb(null,'127.0.0.1',4)}
   }})
-  const sessions=new BeeGameSessionManager(runner,root,async()=>({BEEGAME_CONFIG_DIR:config,BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:catalog,
+  const sessions=new BeeGameSessionManager(runner,root,async()=>({BEEGAME_CONFIG_DIR:config,BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:await writeFixturePlugin(catalog),
     BEEGAME_MODEL_BILLING_SOURCE:'byok',BEEGAME_MODEL:'offline-production-fixture',OPENAI_API_KEY:'fixture-only',OPENAI_BASE_URL:server.url.origin+'/v1'}),{},true)
   const executor=createAgentGoalExecutor({store,sessions}),session=sessions.start({workspacePath:workspace,projectId:'fixture',userId:'owner',userDataRoot:config})
   const run=createRun({projectId:'fixture',ownerId:'owner',workspacePath:workspace,chatSessionId:session.id,requestKey:'production',

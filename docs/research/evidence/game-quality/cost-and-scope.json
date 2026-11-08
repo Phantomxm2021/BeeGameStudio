@@ -1,0 +1,55 @@
+{
+  "bgsModelCalls": 0,
+  "bgsModelTokens": 0,
+  "paidImageCalls": 0,
+  "realProjectTasks": 0,
+  "serviceRestarts": 0,
+  "newSkills": 0,
+  "builtinSkillCount": 21,
+  "newTestCode": 0,
+  "newDependencies": 0,
+  "entryByteDelta": 674,
+  "localChecks": [
+    {
+      "command": "bun test packages/agent-workflow-server/src/beegame/runtime-acceptance.test.ts -t 'delivery rejects declared visual differences|host-required visual delivery|visual comparison statuses'",
+      "exitCode": 0,
+      "passed": 3,
+      "assertions": 28,
+      "filtered": 29
+    },
+    {
+      "command": "bun test packages/agent-workflow-server/src/bgs/skills.test.ts packages/agent-workflow-server/src/beegame/skill-play-capture.test.ts packages/agent-workflow-server/src/beegame/preview-test-recording.test.ts",
+      "exitCode": 0,
+      "passed": 3,
+      "assertions": 24,
+      "initiallySkippedMediaTests": 2
+    },
+    {
+      "command": "BGS_PLAY_CAPTURE_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/skill-play-capture.test.ts -t 'actual Preview path retains video'",
+      "exitCode": 0,
+      "passed": 1,
+      "assertions": 26,
+      "durationMs": 6851.1,
+      "scope": "Existing isolated technical fixture: real Preview video/selected-node audio, capture limits and failed-driver retention; no production game or listening-quality verdict"
+    },
+    {
+      "command": "bun run --cwd packages/agent-workflow-server typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "skill-creator/scripts/quick_validate.py on the three modified entrypoints",
+      "exitCode": 0,
+      "scope": "Format only"
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  ],
+  "unmeasured": [
+    "End-to-end BGS token/time improvement",
+    "Codex research/authoring usage in BGS counters",
+    "Autonomous decision quality"
+  ],
+  "readingCostControl": "Runtime critique is a separate optional reference; existing GDD tradeoff text/path retained unchanged. Byte deltas are not API token measurements."
+}

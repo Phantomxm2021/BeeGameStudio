@@ -1,0 +1,438 @@
+{
+  "status": "failed",
+  "error": "Error: expect(received).toBe(expected)\n\nExpected: true\nReceived: false\n",
+  "observations": [
+    {
+      "label": "platformer-before-1280x800",
+      "game": "platformer",
+      "sourceSha256": "4f43c805e73cf8739a7167da297ce2adb655ee62a3a662d68716441991be8ce8",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "reducedMotion": false,
+      "mode": "ordinary-input-on-local-playable-prototype",
+      "seededDefect": true,
+      "frames": [
+        {
+          "name": "title",
+          "file": "platformer-before-1280x800-title.png",
+          "beforeCapture": {
+            "at": 284.8999996185303,
+            "state": "Ready",
+            "text": "Grounded",
+            "focus": "Begin",
+            "animations": [],
+            "reduced": false
+          },
+          "afterCaptureAt": 422.59999990463257
+        },
+        {
+          "name": "play",
+          "file": "platformer-before-1280x800-play.png",
+          "beforeCapture": {
+            "at": 480.19999980926514,
+            "state": "Playing",
+            "text": "Grounded",
+            "focus": "Pause",
+            "animations": [],
+            "reduced": false
+          },
+          "afterCaptureAt": 542.3999996185303
+        },
+        {
+          "name": "pause-0",
+          "file": "platformer-before-1280x800-pause-0.png",
+          "beforeCapture": {
+            "at": 550.8999996185303,
+            "state": "Paused",
+            "text": "Grounded",
+            "focus": "Resume",
+            "animations": [
+              {
+                "time": 0,
+                "state": "running",
+                "duration": 220
+              }
+            ],
+            "reduced": false
+          },
+          "afterCaptureAt": 708.6999998092651
+        },
+        {
+          "name": "pause-1",
+          "file": "platformer-before-1280x800-pause-1.png",
+          "beforeCapture": {
+            "at": 757.5999999046326,
+            "state": "Paused",
+            "text": "Grounded",
+            "focus": "Resume",
+            "animations": [
+              {
+                "time": 183.30199999734765,
+                "state": "running",
+                "duration": 220
+              }
+            ],
+            "reduced": false
+          },
+          "afterCaptureAt": 907.8999996185303
+        },
+        {
+          "name": "pause-2",
+          "file": "platformer-before-1280x800-pause-2.png",
+          "beforeCapture": {
+            "at": 1129.6999998092651,
+            "state": "Paused",
+            "text": "Grounded",
+            "focus": "Resume",
+            "animations": [],
+            "reduced": false
+          },
+          "afterCaptureAt": 1270
+        },
+        {
+          "name": "rapid-return",
+          "file": "platformer-before-1280x800-rapid-return.png",
+          "beforeCapture": {
+            "at": 1647.1999998092651,
+            "state": "Paused",
+            "text": "Grounded",
+            "focus": "Resume",
+            "animations": [
+              {
+                "time": 133.23999963477263,
+                "state": "running",
+                "duration": 220
+              }
+            ],
+            "reduced": false
+          },
+          "afterCaptureAt": 1803.6999998092651
+        }
+      ],
+      "geometry": {
+        "canvas": {
+          "top": 118.75,
+          "bottom": 681.25
+        },
+        "headerBottom": 118.75,
+        "footerTop": 681.25,
+        "buttons": [
+          {
+            "text": "Pause",
+            "x": 1055.46875,
+            "y": 60.15625,
+            "right": 1140,
+            "bottom": 105.34375
+          }
+        ],
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        }
+      },
+      "inputTrace": [
+        {
+          "at": 1793440088656,
+          "type": "click",
+          "name": "Begin"
+        },
+        {
+          "at": 1793440088779,
+          "type": "click",
+          "name": "Pause"
+        },
+        {
+          "at": 1793440089503,
+          "type": "click",
+          "name": "Resume"
+        },
+        {
+          "at": 1793440089505,
+          "type": "down",
+          "code": "Escape"
+        },
+        {
+          "at": 1793440089506,
+          "type": "up",
+          "code": "Escape"
+        },
+        {
+          "at": 1793440089507,
+          "type": "down",
+          "code": "Escape"
+        },
+        {
+          "at": 1793440089508,
+          "type": "up",
+          "code": "Escape"
+        }
+      ],
+      "headlessRaf": {
+        "samples": [
+          16.800000000000182,
+          16.59999999999991,
+          16.700000000000045,
+          16.59999999999991,
+          16.700000000000045,
+          16.700000000000045,
+          16.59999999999991,
+          16.600000000000136,
+          16.699999999999818,
+          16.700000000000045,
+          16.700000000000045,
+          16.59999999999991,
+          16.700000000000045,
+          16.600000000000136,
+          16.799999999999727,
+          16.600000000000364,
+          16.699999999999818,
+          16.699999999999818,
+          16.600000000000364,
+          16.699999999999818,
+          16.59999999999991,
+          16.700000000000273,
+          16.59999999999991,
+          16.799999999999727,
+          16.600000000000364,
+          16.699999999999818,
+          16.699999999999818,
+          16.600000000000364,
+          16.699999999999818,
+          16.59999999999991
+        ],
+        "medianMs": 16.699999999999818,
+        "maxMs": 16.800000000000182,
+        "limitation": "Observed callback cadence, not display FPS or input-to-photon latency"
+      },
+      "recording": {
+        "id": "3cae6eea-beac-4f22-a320-bb6f2fdef2c2",
+        "label": "platformer-before-1280x800",
+        "conditions": {
+          "source": "agent-declared",
+          "text": "Playable local prototype; ordinary mouse/keyboard; no state injection; headless desktop, not a player study"
+        },
+        "preview": {
+          "mode": "development",
+          "fixture": "platformer",
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "reducedMotion": false
+        },
+        "observedEnvironment": {
+          "status": "observed",
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "devicePixelRatio": 1,
+          "maxTouchPoints": 0,
+          "coarsePointer": false,
+          "hover": true
+        },
+        "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+        "startedAt": "2026-10-31T09:48:08.229Z",
+        "endedAt": "2026-10-31T09:48:10.682Z",
+        "durationMs": 2453,
+        "status": "finished",
+        "endReason": "scenario-finished",
+        "observationStatus": "finished",
+        "gameplayVerdict": "not-evaluated",
+        "droppedEvents": 0,
+        "truncatedEvents": 0,
+        "counts": {
+          "observer.started": 1,
+          "navigation": 1,
+          "console.log": 17
+        },
+        "events": [
+          {
+            "at": "2026-10-31T09:48:08.232Z",
+            "type": "observer.started",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": {
+              "url": "about:",
+              "earlierConsoleHistoryExcluded": true
+            }
+          },
+          {
+            "at": "2026-10-31T09:48:08.233Z",
+            "type": "navigation",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": {
+              "url": "http://127.0.0.1:57679/platformer-before.html"
+            }
+          },
+          {
+            "at": "2026-10-31T09:48:08.259Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Ready\",\"reduced\":false,\"focus\":\"Begin\"},\"state\":\"Ready\",\"at\":21.59999990463257}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:08.658Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"start\",\"state\":\"Playing\",\"at\":425.09999990463257}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:08.660Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":426.69999980926514}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:08.781Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"pause\",\"state\":\"Paused\",\"at\":547.3999996185303}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:08.783Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Paused\",\"reduced\":false,\"focus\":\"Resume\"},\"state\":\"Paused\",\"at\":550.0999999046326}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.006Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"stale-completion\",\"state\":\"Paused\",\"at\":771.6999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.505Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"resume\",\"state\":\"Playing\",\"at\":1271.7999997138977}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.505Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":1272}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.506Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"pause\",\"state\":\"Paused\",\"at\":1273.1999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.506Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Paused\",\"reduced\":false,\"focus\":\"Resume\"},\"state\":\"Paused\",\"at\":1273.6999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.507Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"Escape\",\"state\":\"Paused\",\"at\":1274.1999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.507Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"resume\",\"state\":\"Playing\",\"at\":1274.6999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.508Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Playing\",\"reduced\":false,\"focus\":\"Pause\"},\"state\":\"Playing\",\"at\":1274.7999997138977}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.508Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"Escape\",\"state\":\"Playing\",\"at\":1275.1999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.727Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"stale-completion\",\"state\":\"Paused\",\"at\":1493.7999997138977}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:09.744Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"ui-state\",\"value\":{\"state\":\"Paused\",\"reduced\":false,\"focus\":\"Resume\"},\"state\":\"Paused\",\"at\":1510.8999996185303}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:48:10.036Z",
+            "type": "console.log",
+            "targetId": "B42EA7BAC2954246CF4E067A62289D65",
+            "detail": [
+              "game-event",
+              "{\"event\":\"stale-completion\",\"state\":\"Paused\",\"at\":1731.5}"
+            ]
+          }
+        ],
+        "files": {
+          "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/ui-motion/2026-10-31T09-48-07.977Z/3cae6eea-beac-4f22-a320-bb6f2fdef2c2.json",
+          "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/ui-motion/2026-10-31T09-48-07.977Z/3cae6eea-beac-4f22-a320-bb6f2fdef2c2.png"
+        },
+        "screenshotAvailable": true
+      },
+      "unverified": [
+        "Representative player comprehension and emotional quality",
+        "Physical device input latency, GPU performance, touch/gamepad/XR",
+        "Audiovisual synchronization; these prototypes have no audio",
+        "Autonomous BGS Skill selection or production game quality"
+      ]
+    }
+  ],
+  "durationMs": 7449
+}

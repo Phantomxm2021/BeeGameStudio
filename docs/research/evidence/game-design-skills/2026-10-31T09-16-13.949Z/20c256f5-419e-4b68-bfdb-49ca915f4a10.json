@@ -1,0 +1,116 @@
+{
+  "id": "20c256f5-419e-4b68-bfdb-49ca915f4a10",
+  "label": "defense",
+  "conditions": {
+    "source": "agent-declared",
+    "text": "Synthetic local fixture; 800x600; ordinary keyboard/buttons; no state injection; not novice research"
+  },
+  "preview": {
+    "mode": "development",
+    "fixture": "defense"
+  },
+  "observedEnvironment": {
+    "status": "observed",
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "devicePixelRatio": 1,
+    "maxTouchPoints": 0,
+    "coarsePointer": false,
+    "hover": true
+  },
+  "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+  "startedAt": "2026-10-31T09:16:23.634Z",
+  "endedAt": "2026-10-31T09:16:32.056Z",
+  "durationMs": 8422,
+  "status": "finished",
+  "endReason": "scenario-finished",
+  "observationStatus": "finished",
+  "gameplayVerdict": "not-evaluated",
+  "droppedEvents": 0,
+  "truncatedEvents": 0,
+  "counts": {
+    "observer.started": 1,
+    "navigation": 1,
+    "console.log": 6
+  },
+  "events": [
+    {
+      "at": "2026-10-31T09:16:23.636Z",
+      "type": "observer.started",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": {
+        "url": "http://127.0.0.1:55532/puzzle.html",
+        "earlierConsoleHistoryExcluded": true
+      }
+    },
+    {
+      "at": "2026-10-31T09:16:23.637Z",
+      "type": "navigation",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": {
+        "url": "http://127.0.0.1:55532/defense.html"
+      }
+    },
+    {
+      "at": "2026-10-31T09:16:23.706Z",
+      "type": "console.log",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": [
+        "game-event",
+        "{\"event\":\"start\",\"state\":\"Playing\",\"at\":69.2999997138977}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:16:23.707Z",
+      "type": "console.log",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": [
+        "game-event",
+        "{\"event\":\"build\",\"value\":\"bottom\",\"state\":\"Playing\",\"at\":70.19999980926514}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:16:29.618Z",
+      "type": "console.log",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": [
+        "game-event",
+        "{\"event\":\"base-hit\",\"state\":\"Lost\",\"at\":5975.199999809265}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:16:29.620Z",
+      "type": "console.log",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": [
+        "game-event",
+        "{\"event\":\"restart\",\"state\":\"Playing\",\"at\":5983.199999809265}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:16:29.621Z",
+      "type": "console.log",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": [
+        "game-event",
+        "{\"event\":\"build\",\"value\":\"top\",\"state\":\"Playing\",\"at\":5984.400000095367}"
+      ]
+    },
+    {
+      "at": "2026-10-31T09:16:32.012Z",
+      "type": "console.log",
+      "targetId": "8C00CC85F4C1D7C105FEDB6F9E957901",
+      "detail": [
+        "game-event",
+        "{\"event\":\"defended\",\"state\":\"Won\",\"at\":8375}"
+      ]
+    }
+  ],
+  "files": {
+    "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-16-13.949Z/20c256f5-419e-4b68-bfdb-49ca915f4a10.json",
+    "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-16-13.949Z/20c256f5-419e-4b68-bfdb-49ca915f4a10.png"
+  },
+  "screenshotAvailable": true
+}

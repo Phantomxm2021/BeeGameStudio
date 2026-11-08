@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { prepareNativeMcpConfig } from '../native-mcp-config'
-import { CONTENT_CHECKER_ENTRY } from '../content-checker-runtime'
+import { CONTENT_CHECKER_ENTRY } from '../game-content-validation-cli'
 import { contentConsumerDistribution, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { test, expect } from 'bun:test'
 import { access, mkdir, mkdtemp, realpath, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -9,6 +9,10 @@ import { join, resolve, dirname } from 'node:path'
 import { projectWorkDirectory, projectWorkRoot } from '../project-storage-paths'
 import { tmpdir } from 'node:os'
 import { openAgentTools } from './agent-tools'
+import { createImageGenerationAccess } from '../../image-generation/access'
+import { ImageAttemptStore } from '../../image-generation/attempt'
+import { ImageGenerationService } from '../../image-generation/service'
+import { imageConfigSchema } from '../../image-generation/config'
 import { sharedContentChecker } from '../content-checker-runtime'
 import { CONTENT_DRAFT_EXAMPLES } from '../game-content-validation-cli'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
@@ -25,7 +29,7 @@ import { writeBalanceCalculatorFixture } from './balance-calculation-fixture'
 
 async function command(root: string, directory: string, name: string, ...args: string[]) {
   const child = Bun.spawn([process.execPath, resolve(root, directory, name), ...args], {
-    cwd: root, env: { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture'), BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl,
+    cwd: root, env: { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture'), BEEGAME_CONTENT_CHECKER_MODULE: name === 'check-content.mjs' ? new URL('../game-content-validation-cli.ts', import.meta.url).href : (await sharedContentChecker()).moduleUrl,
       BEEGAME_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl },
     stdout: 'pipe', stderr: 'pipe',
   })
@@ -145,7 +149,7 @@ test('explicit historical layout checker preserves confirmed orientation without
     const result = JSON.parse(check.stdout)
     expect(result.coverage.targets[0].viewports).not.toContainEqual([844, 390])
     expect(await readFile(path, 'utf8')).toBe(bytes)
-    await writeFile(resolve(root,tools.directory,'check-content.mjs'),CONTENT_CHECKER_ENTRY.replace("{ profile: 'current' }",JSON.stringify({profile:'current',confirmed:tools.uiLayoutConstraints})))
+    await writeFile(resolve(root,tools.directory,'check-content.mjs'),CONTENT_CHECKER_ENTRY.replace("{ profile: 'current' }",JSON.stringify({profile:'current',confirmed:{platform:'Web',inputs:['Touch'],orientation:'Landscape',dimension:'2D'}})))
     const conflict = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--orientation', 'Portrait')
     expect(conflict.code).toBe(1)
     expect(conflict.stdout).toContain('differs from the confirmed project target')
@@ -168,7 +172,9 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(tools.turnContext).not.toContain('quality evidence')
     expect(tools.systemContext).not.toContain('consumer.mjs')
     expect(tools.systemContext).not.toContain('check-content.mjs')
-    expect(tools.systemContext).toContain('bun resources.mjs --contract registration')
+    expect(tools.systemContext).toContain('Acquisition: bun assets.mjs --help')
+    expect(tools.systemContext).toContain('Register delivered files: bun resources.mjs --help')
+    expect(tools.systemContext).not.toContain('--contract registration')
     expect(tools.turnContext).not.toContain('consumer.mjs')
     expect(tools.turnContext).not.toContain('Native bgs-ui-layout reads:')
     expect(tools.turnContext).not.toContain('detailsFor:')
@@ -239,7 +245,7 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(resourceContract.code, resourceContract.stderr).toBe(0)
     expect(resourceContract.stdout).toContain('Asset Manifest authoring contract')
     expect(resourceContract.stdout).toContain('current BGS\ntools directory')
-    expect(resourceContract.stdout).toContain('CheckResourcesAndBindings {}')
+    expect(resourceContract.stdout).toContain('resources.mjs --check')
     expect(resourceContract.stdout).toContain('no platform requires')
     expect(resourceContract.stdout).not.toContain('This command requires a content index.')
     expect(resourceContract.stdout).not.toContain('assets/manifest/check.mjs')
@@ -303,14 +309,14 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
   } finally { await tools.close(); upstream.stop(true); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
-test('tool preparation leaves catalog reads to the Agent through the existing authenticated entry',async()=>{
+for (const research of [false,true]) test('tool preparation leaves catalog reads to the Agent through the existing authenticated entry, research='+research,async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-catalog-on-demand-')))
   const calls:{path:string;auth:string|null}[]=[]
   const upstream=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
     calls.push({path:new URL(request.url).pathname,auth:request.headers.get('authorization')})
     return Response.json({items:[{packId:'audio-pack',license:'CC0'}],total:1})
   }})
-  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic-catalog-token'})
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,referenceOnly:research,creativeTask:research?'discovery':undefined,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic-catalog-token'})
   try {
     expect(calls).toHaveLength(0)
     expect(tools.turnContext).not.toContain('audio-pack')
@@ -355,7 +361,7 @@ test('image quote is read-only and a generated visual proposal is saved for late
     return new Response(png,{headers:{'content-type':'image/png'}})
   }})
   const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined,
-    openImage:()=>({endpoint:bridge.url.origin+'/generate',instruction:'fixture image bridge',close:async()=>{}})})
+    openImage:()=>({fetch: (request:Request) => fetch(new Request(bridge.url.origin+'/generate', request)),instruction:'fixture image bridge',close:async()=>{}})})
   try {
     expect(tools.turnContext).toContain('Image generation is configured. Task-authorized requests use the existing generation service for availability, pricing and applicable Credit checks.')
     expect(quotes).toBe(0)
@@ -389,7 +395,7 @@ test('an open image bridge does not falsely claim its default quote is usable',a
     return new Response('not available',{status:503})
   }})
   const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined,
-    openImage:()=>({endpoint:bridge.url.origin+'/generate',instruction:'fixture image bridge',close:async()=>{}})})
+    openImage:()=>({fetch: (request:Request) => fetch(new Request(bridge.url.origin+'/generate', request)),instruction:'fixture image bridge',close:async()=>{}})})
   try {
     expect(tools.turnContext).toContain('Image generation is configured. Task-authorized requests use the existing generation service for availability, pricing and applicable Credit checks.')
     expect(generated).toBe(0)
@@ -640,7 +646,7 @@ test('new projects do not prepare or advertise a calculation appendix helper', a
   } finally { await tools.close(); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 })
 
-test('a retained asset entry uses current image and library bridges across three turns', async () => {
+test('renewed asset entries use current image and library bridges across three turns', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-assets-turns-')))
   let catalogs = 0, quotes = 0, generated = 0, opened = 0, closed = 0
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
@@ -664,34 +670,37 @@ test('a retained asset entry uses current image and library bridges across three
             if (request.method === 'GET') { quotes++; return Response.json({ available: true, turn }) }
             generated++; return new Response('fixture bytes', { headers: { 'content-type': 'image/png' } })
           } })
-          return { endpoint: bridge.url.origin + '/image', instruction: 'Local fixture', close: async () => { closed++; bridge.stop(true) } }
+          return { fetch: (request:Request) => fetch(new Request(bridge.url.origin + '/image', request)), instruction: 'Local fixture', close: async () => { closed++; bridge.stop(true) } }
         } })
-      entries.push(resolve(root, active.directory, 'assets.mjs'))
+      const entry=resolve(active.directory,'assets.mjs')
+      entries.push(entry)
       const source = await readFile(entries.at(-1)!, 'utf8')
       expect(source.split('\n')[0]).not.toContain('127.0.0.1')
       expect(opened).toBe(turn)
-      expect((await run(entries[0]!, '--help')).code).toBe(0)
+      expect((await run(entry, '--help')).code).toBe(0)
       expect(opened).toBe(turn)
-      // Retained paths resolve only the current turn; concurrent calls share one backend.
-      const quote = turn===0 ? (await Promise.all([run(entries[0]!, 'cost'),run(entries[0]!, 'cost')]))[0]!
-        : await run(entries[0]!, 'cost')
+      // The renewed entry resolves only the current turn; concurrent calls share one backend.
+      const quote = turn===0 ? (await Promise.all([run(entry, 'cost'),run(entry, 'cost')]))[0]!
+        : await run(entry, 'cost')
       expect(opened).toBe(turn+1)
       expect(quote.code, quote.stderr).toBe(0)
       expect(JSON.parse(quote.stdout).turn).toBe(turn)
-      const catalog = await run(entries[0]!, 'catalog')
+      const catalog = await run(entry, 'catalog')
       expect(catalog.code, catalog.stderr).toBe(0)
       expect(JSON.parse(catalog.stdout).items[0].packId).toBe('fixture')
       if (turn === 2) {
         await writeFile(join(root, 'request.json'), JSON.stringify({ requestId: 'fixture-attempt', purpose: 'reference', prompt: 'Fixture' }))
-        const result = await run(entries[0]!, 'generate', 'request.json', 'assets/result.png')
+        const result = await run(entry, 'generate', 'request.json', 'assets/result.png')
         expect(result.code, result.stderr).toBe(0)
       }
-      await active.close()
-      expect(closed).toBe(turn+1)
-      const expired = await run(entries[0]!, 'cost')
+      await rm(env.BEEGAME_ASSET_CAPABILITY_FILE)
+      const expired = await run(entry, 'cost')
       expect(expired.code).toBe(1)
       expect(expired.stderr).toContain('ASSET_CAPABILITY_EXPIRED')
-      expect((await run(entries[0]!, '--help')).code).toBe(0)
+      expect((await run(entry, '--help')).code).toBe(0)
+      await active.close()
+      expect(closed).toBe(turn+1)
+      await expect(access(active.directory)).rejects.toThrow()
     }
     expect(new Set(entries).size).toBe(3)
     expect(catalogs).toBe(3)
@@ -701,7 +710,7 @@ test('a retained asset entry uses current image and library bridges across three
   } finally { await active?.close(); upstream.stop(true); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
-test('workflow helper resolves a replacement turn capability and rejects wrong or revoked identities', async () => {
+test('workflow helper uses the renewed turn entry and rejects wrong or revoked identities', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-workflow-capability-')))
   const other = await realpath(await mkdtemp(join(tmpdir(), 'bgs-workflow-capability-other-')))
   const calls: unknown[] = []
@@ -723,11 +732,12 @@ test('workflow helper resolves a replacement turn capability and rejects wrong o
   try {
     oldTools = await openAgentTools({ workspacePath: root, sessionId: 'chat', getAuthToken: () => undefined,
       workflow: async value => { calls.push({ turn: 'old', value }); return { turn: 'old' } } })
-    const oldEntry = resolve(root, oldTools.directory, 'workflow.mjs')
     await oldTools.close()
+    await expect(access(oldTools.directory)).rejects.toThrow()
 
     currentTools = await openAgentTools({ workspacePath: root, sessionId: 'chat', getAuthToken: () => undefined,
       workflow: async value => { calls.push({ turn: 'current', value }); return { turn: 'current' } } })
+    const currentEntry = resolve(currentTools.directory, 'workflow.mjs')
     const capability = projectPreviewCapabilityPath(root, 'chat')
     const defaultIndex=currentTools.systemContext.split('. Prefix each filename')[0]!
     for(const name of ['measure','handoff','workflow'])
@@ -736,24 +746,26 @@ test('workflow helper resolves a replacement turn capability and rejects wrong o
     expect(currentTools.systemContext).not.toContain('BgsMeasurement')
     for(const name of ['preview','measure','handoff'])
       expect(await Bun.file(resolve(root,currentTools.directory,name+'.mjs')).exists()).toBe(false)
-    const status = await run(oldEntry, root, capability, '--status')
+    const status = await run(currentEntry, root, capability, '--status')
     expect(status.code, status.stderr).toBe(0)
     expect(JSON.parse(status.stdout)).toEqual({ turn: 'current' })
     expect(calls).toEqual([{ turn: 'current', value: { action: 'status' } }])
-    const help = await run(oldEntry, root, capability, '--help')
+    const help = await run(currentEntry, root, capability, '--help')
     expect(help.code, help.stderr).toBe(0)
-    expect(help.stdout).toContain('For tasks using a tool handoff: --advance <JSON>')
+    expect(help.stdout).toContain('--advance <JSON>')
     expect(help.stdout).not.toContain('Preparatory production handoff: --advance')
-    expect(help.stdout).toContain('GDD and visual-design results use the current final JSON contract, not advance')
-    expect(help.stdout).toContain('in implementation or resource tasks')
+    expect(help.stdout).toContain('GDD and visual results use final JSON')
+    expect(help.stdout).toContain('implementation follows the current native completion contract')
+    expect(help.stdout).not.toContain('separate verification')
+    expect(help.stdout).toContain('Selection records references, not runtime assets')
     expect(calls).toEqual([{ turn: 'current', value: { action: 'status' } }])
 
     const choice={summary:'Existing design reference',sections:[],files:['assets/reference.png']}
-    const selection=await run(oldEntry,root,capability,'--select-visual',JSON.stringify(choice))
+    const selection=await run(currentEntry,root,capability,'--select-visual',JSON.stringify(choice))
     expect(selection.code,selection.stderr).toBe(0)
     expect(calls.at(-1)).toEqual({turn:'current',value:{...choice,action:'select-visual'}})
 
-    const wrongWorkspace = await run(oldEntry, other, capability, '--status')
+    const wrongWorkspace = await run(currentEntry, other, capability, '--status')
     expect(wrongWorkspace.code).toBe(1)
     expect(wrongWorkspace.stderr).toContain('Workflow belongs to another workspace')
     expect(calls).toHaveLength(2)
@@ -767,10 +779,12 @@ test('workflow helper resolves a replacement turn capability and rejects wrong o
     expect(calls).toHaveLength(2)
     await wrongTools.close()
 
-    await currentTools.close()
-    const revoked = await run(oldEntry, root, capability, '--status')
+    await rm(capability)
+    const revoked = await run(currentEntry, root, capability, '--status')
     expect(revoked.code).toBe(1)
     expect(calls).toHaveLength(2)
+    await currentTools.close()
+    await expect(access(currentTools.directory)).rejects.toThrow()
   } finally {
     await wrongTools?.close()
     await currentTools?.close()
@@ -851,14 +865,14 @@ test('configured image MCP generates through the existing command and keeps turn
     return fail ? new Response('Fixture generation outcome unknown',{status:503})
       : new Response(png,{headers:{'content-type':'image/png','x-image-credits-micro':'1000000','x-image-billing-state':'settled'}})
   }})
-  const openImage=()=>{opened++;return {endpoint:bridge.url.origin+'/generate',instruction:'fixture',close:async()=>{}}}
+  const openImage=()=>{opened++;return {fetch: (request:Request) => fetch(new Request(bridge.url.origin+'/generate', request)),instruction:'fixture',close:async()=>{}}}
   const tools=await openAgentTools({sessionId:'fixture',workspacePath:root,getAuthToken:()=>undefined,openImage})
   const client=new Client({name:'image-fixture',version:'1'})
   let next:Awaited<ReturnType<typeof openAgentTools>>|undefined
   try {
-    const noImages=await prepareNativeMcpConfig({},root,undefined,'fixture',{},null)
+    const noImages=await prepareNativeMcpConfig({},root,'fixture')
     expect(noImages.config).toEqual({});await noImages.close()
-    const config=await prepareNativeMcpConfig({},root,undefined,'fixture',{},null,tools.imageGenerationEntry)
+    const config=await prepareNativeMcpConfig({},root,'fixture',{},tools.imageGenerationEntry)
     const server=(config.config.mcp_servers as Record<string,any>)['beegame-images']
     expect(server.args).toEqual([tools.imageGenerationEntry,'--mcp'])
     await client.connect(new StdioClientTransport({...server,cwd:root}))
@@ -936,5 +950,250 @@ test('saved native schemas can use the existing workflow command for development
     expect(code,err).toBe(0);expect(JSON.parse(out)).toEqual({status:'idle'})
     expect(observed).toEqual([{action:'preview',operation:'status'}])
     expect(tools.systemContext).toContain('saved native schema does not list preview')
+  }finally{await tools.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+
+
+test('closing the existing resource bridge cancels its active catalog operation',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-catalog-on-demand-')))
+  let entered!:()=>void,aborted!:()=>void,calls=0
+  const ready=new Promise<void>(resolve=>entered=resolve),cancelled=new Promise<void>(resolve=>aborted=resolve)
+  const upstream=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
+    calls++;entered();return new Promise<Response>(resolve=>request.signal.addEventListener('abort',()=>{aborted();resolve(new Response(null,{status:503}))},{once:true}))
+  }})
+  const tools=await openAgentTools({sessionId:'fixture',workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic'})
+  try{
+    const result=command(root,tools.directory,'assets.mjs','catalog')
+    await ready
+    await tools.close()
+    await Promise.race([cancelled,Bun.sleep(1000).then(()=>{throw Error('Catalog request outlived the closed capability')})])
+    expect((await result).code).toBe(1);expect(calls).toBe(1)
+  }finally{await tools.close();upstream.stop(true);await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+},5000)
+
+test('actual resource entry displays the confirmed source preference and host registration cannot downgrade it',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-required-resource-entry-')))
+  const tools=await openAgentTools({workspacePath:root,sessionId:'fixture',resourceLibraryUsage:'required',getAuthToken:()=>undefined})
+  try {
+    const result=await command(root,tools.directory,'resources.mjs','--contract','registration')
+    expect(result.code,result.stderr||result.stdout).toBe(0)
+    const request=JSON.parse(result.stdout.split('```json\n')[1]!.split('\n```')[0]!)
+    expect(request.projectTarget.resource_library_usage).toBe('required')
+    expect(await readFile(join(root,'assets/asset-manifest.json'),'utf8').catch(()=>undefined)).toBeUndefined()
+    await mkdir(join(root,'assets/runtime/example'),{recursive:true})
+    await writeFile(join(root,request.resources[0].root_path),'{}')
+    request.projectTarget.resource_library_usage='optional'
+    await writeFile(join(root,'registration.json'),JSON.stringify(request))
+    const rejected=await command(root,tools.directory,'resources.mjs','registration.json')
+    expect(rejected.code).toBe(1)
+    expect(rejected.stdout).toContain('conflicts with confirmed resource_library_usage: required')
+    delete request.projectTarget.resource_library_usage
+    await writeFile(join(root,'registration.json'),JSON.stringify(request))
+    const registered=await command(root,tools.directory,'resources.mjs','registration.json')
+    expect(registered.code,registered.stdout||registered.stderr).toBe(0)
+    const saved=JSON.parse(await readFile(join(root,'assets/asset-manifest.json'),'utf8'))
+    expect(saved.project_target.resource_library_usage).toBe('required')
+    const configured=await command(root,tools.directory,'resources.mjs','--contract','registration')
+    expect(configured.stdout).not.toContain('"projectTarget"')
+  }finally{await tools.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('document image access stays lazy and reference-only without resource or workflow capabilities', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-reference-tools-')))
+  let opened = 0, requests = 0
+  const image = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    requests++
+    if (request.method === 'GET') return Response.json({available:true})
+    expect((await request.json()).purpose).toBe('reference')
+    return new Response('mock reference', {headers:{'content-type':'image/png'}})
+  }})
+  const tools = await openAgentTools({workspacePath:root,sessionId:'fixture',referenceOnly:true,
+    getAuthToken:()=>{throw Error('Reference generation must not open resource-library authentication')},
+    openImage:()=>{opened++;return {fetch: (request:Request) => fetch(new Request(image.url.origin, request)),instruction:'Mock image access',close:async()=>{}}}})
+  try {
+    const capability = JSON.parse(await readFile(projectPreviewCapabilityPath(root,'fixture'),'utf8'))
+    expect(opened).toBe(0)
+    expect(capability.assets).not.toHaveProperty('registrationEndpoint')
+    expect(capability.assets).not.toHaveProperty('libraryBaseUrl')
+    expect(tools.workflow).toBeUndefined()
+    expect(tools).not.toHaveProperty('uiLayoutConstraints')
+    expect(tools.systemContext).not.toContain('Register delivered files')
+    for (const name of ['resources.mjs','media.mjs','workflow.mjs']) await expect(access(join(tools.directory,name))).rejects.toThrow()
+    const rejected = await fetch(capability.assets.imageEndpoint,{method:'POST',body:JSON.stringify({purpose:'production',prompt:'Forbidden production'})})
+    expect(rejected.status).toBe(403)
+    expect(opened).toBe(0);expect(requests).toBe(0)
+    const quote = await fetch(capability.assets.imageEndpoint)
+    expect((await quote.json()).available).toBe(true)
+    const reference = await fetch(capability.assets.imageEndpoint,{method:'POST',body:JSON.stringify({purpose:'reference',prompt:'A design question'})})
+    expect(await reference.text()).toBe('mock reference')
+    expect(opened).toBe(1);expect(requests).toBe(2)
+    const endpoint = capability.assets.imageEndpoint.replace(/\/image$/, '')
+    expect((await fetch(endpoint,{method:'POST',body:JSON.stringify({registration:{operation:'register'}})})).status).toBe(404)
+  } finally {await tools.close();image.stop(true);await rm(root,{recursive:true,force:true})}
+})
+
+
+test('one task router keeps image identity, validation and recovery across closed turns',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-single-image-router-')))
+  const png=await (await import('sharp')).default({create:{width:4,height:3,channels:3,background:'#123456'}}).png().toBuffer()
+  const config=imageConfigSchema.parse({model:'fixture-image',apiKey:'fixture-secret',quality:'medium'})
+  let generated=0,opened=0,billing=0
+  const attempts=new ImageAttemptStore(join(root,'host'),{generate:async(_config,request)=>{
+    generated++;expect(request.prompt).toBe('Saved fixture')
+    return {bytes:png,model:config.model,mimeType:'image/png',usage:null}
+  }})
+  const service=new ImageGenerationService(attempts,{apply:async()=>{billing++;throw Error('External image cannot use platform billing')}})
+  const open=()=>openAgentTools({sessionId:'fixture',workspacePath:root,getAuthToken:()=>undefined,
+    openImage:()=>{opened++;return createImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,source:'byok',loadConfig:async()=>config,service})}})
+  let tools=await open()
+  const capability=async()=>JSON.parse(await readFile(projectPreviewCapabilityPath(root,'fixture'),'utf8')).assets.imageEndpoint as string
+  const request={requestId:'preserved-id',purpose:'reference',prompt:'Saved fixture'}
+  const post=(url:string,value:unknown)=>fetch(url,{method:'POST',body:JSON.stringify(value)})
+  try{
+    let endpoint=await capability()
+    expect(opened).toBe(0)
+    expect((await fetch(endpoint.replace(/\/image$/,'/wrong'))).status).toBe(404)
+    expect((await fetch(endpoint,{headers:{origin:'https://untrusted.test'}})).status).toBe(404)
+    expect(opened).toBe(0)
+    expect((await post(endpoint,{...request,purpose:undefined})).status).toBe(422)
+    expect(generated).toBe(0);expect(billing).toBe(0)
+    const first=await post(endpoint,request)
+    expect(first.status).toBe(200);expect(first.headers.get('x-image-billing-state')).toBe('external')
+    expect(Buffer.from(await first.arrayBuffer()).equals(png)).toBe(true)
+    expect(generated).toBe(1)
+    const record=await readFile(join(root,'assets/ai-generation-prompts.md'),'utf8')
+    expect(record).toContain('preserved-id');expect(record).not.toContain(new URL(endpoint).pathname)
+    const previousDirectory=tools.directory
+    await tools.close()
+    await expect(access(previousDirectory)).rejects.toThrow()
+    await expect(fetch(endpoint)).rejects.toThrow()
+    tools=await open();endpoint=await capability()
+    expect(tools.directory).not.toBe(previousDirectory)
+    await access(tools.directory)
+    const recovered=await post(endpoint,request)
+    expect(recovered.status).toBe(200);expect(Buffer.from(await recovered.arrayBuffer()).equals(png)).toBe(true)
+    expect((await post(endpoint,{...request,prompt:'Changed paid parameters'})).status).toBe(409)
+    expect(generated).toBe(1);expect(opened).toBe(2);expect(billing).toBe(0)
+  }finally{await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+},10000)
+
+test.each(['image','library'] as const)('the merged task route retains the %s body limit, including unknown lengths',async kind=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-router-body-limit-')))
+  let opened=0,authenticated=0
+  const tools=await openAgentTools({sessionId:'fixture',workspacePath:root,libraryBaseUrl:'http://127.0.0.1:1',
+    getAuthToken:()=>{authenticated++;return undefined},openImage:()=>{
+      opened++;throw Error('Oversize image request must not open generation access')
+    }})
+  try{
+    const assets=JSON.parse(await readFile(projectPreviewCapabilityPath(root,'fixture'),'utf8')).assets
+    const endpoint=kind==='image'?assets.imageEndpoint:assets.libraryBaseUrl+'/api/resource-catalog/packs'
+    const limit=kind==='image'?256*1024:1024*1024
+    const bytes=new Uint8Array(limit+1)
+    const declared=await fetch(endpoint,{method:'POST',body:bytes})
+    expect(declared.status).toBe(413)
+    const chunked=new ReadableStream<Uint8Array>({start(controller){controller.enqueue(bytes);controller.close()}})
+    const streamed=await fetch(endpoint,{method:'POST',body:chunked})
+    expect(streamed.status).toBe(413)
+    expect(opened).toBe(0);expect(authenticated).toBe(0)
+  }finally{await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+})
+
+test.each(['client','task'] as const)('direct image dispatch propagates %s cancellation and drains before closing access',async cancel=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-direct-image-cancel-')))
+  let entered!:()=>void,aborted=false,closed=false,calls=0
+  const ready=new Promise<void>(resolve=>entered=resolve)
+  const tools=await openAgentTools({sessionId:'fixture',workspacePath:root,getAuthToken:()=>undefined,openImage:()=>({
+    instruction:'Fixture direct access',fetch:async(request:Request)=>{
+      calls++;entered()
+      return new Promise<Response>(resolve=>request.signal.addEventListener('abort',()=>{
+        aborted=true;resolve(new Response('cancelled',{status:503}))
+      },{once:true}))
+    },close(){expect(aborted).toBe(true);closed=true}
+  })})
+  try{
+    const endpoint=JSON.parse(await readFile(projectPreviewCapabilityPath(root,'fixture'),'utf8')).assets.imageEndpoint
+    const controller=new AbortController()
+    const result=fetch(endpoint,{signal:controller.signal}).catch(error=>error)
+    await ready
+    if(cancel==='client'){controller.abort();await result}
+    await tools.close();await result
+    expect(aborted).toBe(true);expect(closed).toBe(true);expect(calls).toBe(1)
+    await expect(fetch(endpoint)).rejects.toThrow()
+  }finally{await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+},5000)
+
+
+test('closing during lazy image initialization cannot dispatch generation after cancellation',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-lazy-image-close-')))
+  let entered!:()=>void,release!:()=>void,calls=0,closed=0
+  const ready=new Promise<void>(resolve=>entered=resolve),opening=new Promise<void>(resolve=>release=resolve)
+  const tools=await openAgentTools({sessionId:'fixture',workspacePath:root,getAuthToken:()=>undefined,openImage:async()=>{
+    entered();await opening
+    return {instruction:'Fixture',fetch:async()=>{calls++;return new Response('unexpected')},close(){closed++}}
+  }})
+  try{
+    const endpoint=JSON.parse(await readFile(projectPreviewCapabilityPath(root,'fixture'),'utf8')).assets.imageEndpoint
+    const result=fetch(endpoint).catch(error=>error)
+    await ready
+    const closing=tools.close();release()
+    await closing;await result
+    expect(calls).toBe(0);expect(closed).toBe(1)
+  }finally{release();await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+},5000)
+
+
+test('tool cleanup drains current work and never removes a renewed turn directory or capability',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-tools-drain-cleanup-')))
+  let entered!:()=>void,release!:()=>void
+  const started=new Promise<void>(resolve=>entered=resolve),gate=new Promise<void>(resolve=>release=resolve)
+  const old=await openAgentTools({sessionId:'same',workspacePath:root,getAuthToken:()=>undefined,
+    workflow:async()=>{entered();await gate;return 'old'}})
+  let current:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  const running=old.workflow!({action:'status'}).catch(error=>error)
+  try{
+    await started
+    const closing=old.close()
+    await access(old.directory)
+    current=await openAgentTools({sessionId:'same',workspacePath:root,getAuthToken:()=>undefined,
+      workflow:async()=>({turn:'renewed'})})
+    const capability=projectPreviewCapabilityPath(root,'same')
+    const currentCapability=await readFile(capability,'utf8')
+    release();await closing
+    expect(await running).toBeInstanceOf(Error)
+    await expect(access(old.directory)).rejects.toThrow()
+    await access(current.directory)
+    expect(await readFile(capability,'utf8')).toBe(currentCapability)
+    expect(await current.workflow!({action:'status'})).toEqual({turn:'renewed'})
+    await old.close()
+    await access(current.directory)
+  }finally{
+    release();await running;await old.close();await current?.close()
+    await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})
+  }
+})
+
+
+test('design reference selection uses the existing workflow CLI without exposing production capabilities', async () => {
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-reference-selection-')))
+  const calls:unknown[]=[]
+  const tools=await openAgentTools({workspacePath:root,sessionId:'fixture',referenceOnly:true,getAuthToken:()=>undefined,
+    workflow:async value=>{calls.push(value);return {retained:true}}})
+  try {
+    const request={summary:'Chosen existing picture',sections:[],files:['docs/treatment.svg']}
+    const result=await command(root,tools.directory,'workflow.mjs','--select-visual',JSON.stringify(request))
+    expect(result.code,result.stdout||result.stderr).toBe(0)
+    expect(calls).toEqual([{...request,action:'select-visual'}])
+    const help=await command(root,tools.directory,'workflow.mjs','--help')
+    expect(help.stdout+help.stderr).toContain('--select-visual')
+    expect(help.stdout+help.stderr).not.toContain('--advance')
+    for(const file of ['media.mjs','resources.mjs'])await expect(access(join(tools.directory,file))).rejects.toThrow()
+    const cli=await readFile(join(tools.directory,'workflow.mjs'),'utf8')
+    const endpoint=JSON.parse(cli.match(/const api=new URL\(("[^"\n]+")\);/)![1]!)
+    const denied=await fetch(endpoint,{method:'POST',body:JSON.stringify({registration:{operation:'register'}})})
+    expect(denied.status).toBe(404)
+    expect(calls).toHaveLength(1)
   }finally{await tools.close();await rm(root,{recursive:true,force:true})}
 })

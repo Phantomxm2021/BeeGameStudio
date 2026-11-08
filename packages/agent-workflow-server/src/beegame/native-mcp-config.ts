@@ -4,20 +4,15 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { McpServerConfig } from '../mcp-servers-store'
-import { sharedProjectReads } from './content-checker-runtime'
-import type { LayoutConstraints } from './ui-layout-audit'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
-
-export const NATIVE_READ_TOOLS = ['ReadDesignHandoff',
-  'ReadImplementationTask', 'CheckResourcesAndBindings'] as const
 
 export const NATIVE_MCP_CONFIG_ENV = 'BEEGAME_NATIVE_MCP_SERVERS_JSON'
 
 /** Adapt owner-scoped BGS settings to Bgs MCP configuration. Secrets
  * cross only the private app-server pipe, outside project reads and process arguments. */
-export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, uiLayoutConstraints?: LayoutConstraints, sessionId?: string, networkOptions: McpHttpNetworkOptions = {}, projectReadToolPath?: string | null, imageGenerationEntry?: string) {
+export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, sessionId?: string, networkOptions: McpHttpNetworkOptions = {}, imageGenerationEntry?: string) {
   const raw = environment[NATIVE_MCP_CONFIG_ENV]
-  if (!raw && !uiLayoutConstraints && !imageGenerationEntry) return { config: {} as Record<string, unknown>, context: '', close: async () => {} }
+  if (!raw && !imageGenerationEntry) return { config: {} as Record<string, unknown>, context: '', close: async () => {} }
   const servers: McpServerConfig[] = raw ? JSON.parse(raw) : []
   if (!Array.isArray(servers)) throw Error('Invalid BGS runtime MCP configuration')
   const root = await realpath(workspace), mcpServers: Record<string,unknown> = {}, unavailable: string[] = [], httpServers: Record<string,McpHttpServer> = {}
@@ -52,15 +47,6 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
       httpServers[key] = { url: server.url, headers: server.headers }
     } else { skip(server.transport === 'sse' ? 'legacy SSE is unsupported; use a Streamable HTTP endpoint' : 'unsupported transport') }
   }
-  if (uiLayoutConstraints) {
-    if (mcpServers['bgs-ui-layout'] || httpServers['bgs-ui-layout']) throw Error('bgs-ui-layout is reserved for the host project read tools')
-    let path = projectReadToolPath
-    if (path === undefined) {
-      try { path = (await sharedProjectReads()).path }
-      catch (error) { unavailable.push('project read tools: ' + (error instanceof Error ? error.message : String(error))) }
-    } else if (path === null) unavailable.push('project read tools: host component unavailable')
-    if (path) mcpServers['bgs-ui-layout'] = { command: process.execPath, args: [path, root] }
-  }
   if (imageGenerationEntry) {
     if (!sessionId) throw Error('Image MCP requires a current session identity')
     mcpServers['beegame-images'] = { command:process.execPath,args:[imageGenerationEntry,'--mcp'],tool_timeout_sec:180,
@@ -78,6 +64,7 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
   try {
     const http = Object.keys(httpServers).length ? await startNativeMcpHttp(httpServers, networkOptions) : undefined
     Object.assign(mcpServers, http?.config)
+    if (http) unavailable.push(...http.unavailable)
     // The native client applies the same explicit selection to stdio and relayed HTTP tools.
     for (const server of servers) {
       const config = mcpServers['bgs-' + server.id] as Record<string, unknown> | undefined

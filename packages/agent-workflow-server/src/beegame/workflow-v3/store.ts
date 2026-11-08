@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, realpathSync } from 'node:fs'
@@ -11,8 +11,18 @@ export const previewRunState = (run: PreviewRunState): PreviewRunState => ({
   id: run.id, projectId: run.projectId, ownerId: run.ownerId, workspacePath: run.workspacePath,
   version: run.version, ...(run.writer ? {writer: {...run.writer}} : {}),
 })
+export type RuntimeRunState = PreviewRunState & Pick<Run, 'paused'> & {
+  agentTurns?: Array<Pick<NonNullable<Run['agentTurns']>[number],
+    'attemptId' | 'startedAt' | 'quiescedAt' | 'finishedAt' | 'status' | 'notStarted'>>
+}
+export const runtimeRunState = (run: Run): RuntimeRunState => ({
+  ...previewRunState(run), ...(run.paused ? {paused: {...run.paused}} : {}),
+  ...(run.agentTurns ? {agentTurns: run.agentTurns.map(({attemptId, startedAt, quiescedAt, finishedAt, status, notStarted}) =>
+    ({attemptId, startedAt, quiescedAt, finishedAt, status, notStarted}))} : {}),
+})
 export type WorkflowStore = {
   read(projectId: string, actorId: string): Promise<Run | undefined>
+  readRuntimeState?(projectId: string, actorId: string): Promise<RuntimeRunState | undefined>
   readPreviewState?(projectId: string, actorId: string): Promise<PreviewRunState | undefined>
   /** Read-only count of persisted unresolved writers in the configured store. */
   writerStatus?(): Promise<WorkflowWriterStatus>
@@ -57,6 +67,7 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
     try { return JSON.parse(await readFile(filename(projectId), 'utf8')) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
   }
+  const runtimeStates = new Map<string, {stamp: string; state: RuntimeRunState}>()
   return {
     async writerStatus() {
       let names: string[]
@@ -77,6 +88,28 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
         return unknownWriterStatus()
       }
       return { writers, state: writers ? 'active' : 'idle', scope: 'configured-store' }
+    },
+    async readRuntimeState(projectId, actorId) {
+      let stamp: string
+      try {
+        const info = await stat(filename(projectId), {bigint: true})
+        stamp = [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':')
+      } catch (error) {
+        runtimeStates.delete(projectId)
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+        throw error
+      }
+      const cached = runtimeStates.get(projectId)
+      let state: RuntimeRunState | undefined
+      if (cached?.stamp === stamp) state = cached.state
+      else {
+        const value = await load(projectId)
+        state = value ? runtimeRunState(value.run) : undefined
+        if (state) runtimeStates.set(projectId, {stamp, state})
+        else runtimeStates.delete(projectId)
+      }
+      if (state && state.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
+      return state ? structuredClone(state) : undefined
     },
     async readPreviewState(projectId, actorId) {
       const value = await load(projectId)
@@ -101,6 +134,7 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
         if (!value) return
         if (value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
         await rm(filename(projectId), { force: true })
+        runtimeStates.delete(projectId)
       })
       const marker = work.then(() => {}, () => {})
       queues.set(lock, marker)
@@ -189,6 +223,7 @@ export function assertCommit(projectId: string, actorId: string, version: number
         !sameJson(turn.message,old.message) || !sameJson(turn.production,old.production) ||
         !sameJson(turn.projectInputs,old.projectInputs) ||
         old.productionHandoff && !sameJson(turn.productionHandoff,old.productionHandoff) ||
+        old.implementationVerification && !sameJson(turn.implementationVerification,old.implementationVerification) ||
         old.status!=='running' && !sameJson(old,turn) || old.quiescedAt && turn.quiescedAt!==old.quiescedAt)
       throw new WorkflowError('immutable-exit-evidence','Native goal execution history cannot be removed or rewritten')
     if (!sameJson(turn.visualSelection, old.visualSelection)) {
@@ -198,6 +233,10 @@ export function assertCommit(projectId: string, actorId: string, version: number
       if (!sameJson(old.visualSelection?.sources ?? [], selected.slice(0, old.visualSelection?.sources.length ?? 0)))
         throw new WorkflowError('immutable-visual-source', 'Selected visual source bytes cannot be removed or replaced within a task')
     }
+    if(turn.implementationVerification && !old.implementationVerification &&
+        (turn.production?.stage !== 'verification' || old.status !== 'running' || old.quiescedAt ||
+          prior.writer?.attemptId !== turn.attemptId || next.writer?.attemptId !== turn.attemptId))
+      throw new WorkflowError('stale-attempt','Verification result requires the active verification task')
     if(turn.productionHandoff && !old.productionHandoff && (old.status!=='running' || old.quiescedAt ||
         prior.writer?.attemptId!==turn.attemptId || next.writer?.attemptId!==turn.attemptId))
       throw new WorkflowError('stale-attempt','Production handoff requires the active writer')
@@ -255,6 +294,8 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
     }
     return response.json()
   }
+  const runtimeStates = new Map<string, {identity: string; state: Promise<RuntimeRunState | undefined>}>()
+  const identity = (run: PreviewRunState) => JSON.stringify([run.id, run.version, run.workspacePath])
   return {
     async writerStatus() {
       try {
@@ -296,6 +337,38 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
           !Number.isSafeInteger(state.version) || state.version < 1)
         throw new WorkflowError('invalid-commit', 'Invalid Preview Run identity or revision', 400)
       return previewRunState(state)
+    },
+    async readRuntimeState(projectId, actorId) {
+      const key = JSON.stringify([projectId, actorId])
+      // Never cache permission: this owner-filtered query also sees deletion,
+      // writer changes and the current committed revision before any reuse.
+      const header = await this.readPreviewState!(projectId, actorId).catch(error => {
+        runtimeStates.delete(key)
+        throw error
+      })
+      if (!header) { runtimeStates.delete(key); return undefined }
+      let entry = runtimeStates.get(key)
+      if (!entry || entry.identity !== identity(header)) {
+        const next: {identity: string; state: Promise<RuntimeRunState | undefined>} = {
+          identity: identity(header),
+          state: this.read(projectId, actorId).then(run => {
+            if (!run) return undefined
+            next.identity = identity(run)
+            return runtimeRunState(run)
+          }),
+        }
+        runtimeStates.set(key, next)
+        entry = next
+      }
+      try {
+        const state = await entry.state
+        if (!state && runtimeStates.get(key) === entry) runtimeStates.delete(key)
+        return structuredClone(state)
+      }
+      catch (error) {
+        if (runtimeStates.get(key) === entry) runtimeStates.delete(key)
+        throw error
+      }
     },
     async read(projectId, actorId) {
       const run = await call('beegame_workflow_v3_read', { p_project_id: projectId, p_actor_id: actorId })

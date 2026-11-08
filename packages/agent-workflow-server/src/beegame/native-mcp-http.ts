@@ -1,14 +1,14 @@
-import { resolveMcpOutboundTarget } from '../mcp-outbound-policy'
+import { inspectMcpOutboundTarget } from '../mcp-outbound-policy'
 import { mcpHttpHeaders } from '../mcp-http-headers'
 import type { McpServerEnvVar } from '../mcp-servers-store'
 import { modelRuntimeFetch } from './model-runtime-transport'
-import { getTLSFetchOptions, resolveApprovedOutboundTarget, type OutboundTargetPolicyOptions,
+import { getTLSFetchOptions, inspectOutboundTarget, type OutboundTargetPolicyOptions,
   type ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 import { createPinnedRuntimeFetch } from './model-runtime-network'
 
 export type McpHttpNetworkOptions = {
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
-  resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
+  inspectOutboundTarget?: typeof inspectOutboundTarget
 }
 
 export type McpHttpServer = { url: string; headers?: McpServerEnvVar[] }
@@ -17,13 +17,21 @@ export type McpHttpServer = { url: string; headers?: McpServerEnvVar[] }
  * endpoints; never give the native client an unrestricted remote URL. */
 export async function startNativeMcpHttp(servers: Record<string, string | McpHttpServer>, options: McpHttpNetworkOptions = {}) {
   const targets: Record<string, ApprovedOutboundTarget> = {}
+  const unavailable: string[] = []
   const upstreamHeaders: Record<string, Record<string, string>> = {}
   for (const [name, config] of Object.entries(servers)) {
     const url = typeof config === 'string' ? config : config.url
     upstreamHeaders[name] = mcpHttpHeaders(typeof config === 'string' ? undefined : config.headers)
-    const target = await resolveMcpOutboundTarget(url, options.outboundTargetPolicyOptions, options.resolveOutboundTarget)
-    if (!target) throw Error('MCP endpoint is not permitted: ' + name)
-    targets[name] = target
+    const inspection = await inspectMcpOutboundTarget(url, options.outboundTargetPolicyOptions, options.inspectOutboundTarget)
+    if (!inspection.approved) {
+      unavailable.push(name + ': ' + inspection.code)
+      continue
+    }
+    targets[name] = inspection.target
+  }
+  if (!Object.keys(targets).length) {
+    const config: Record<string, { url: string; http_headers: Record<string, string> }> = {}
+    return { config, unavailable, close: async () => {} }
   }
   const request = createPinnedRuntimeFetch(modelRuntimeFetch, targets, { tls: getTLSFetchOptions().tls })
   const capability = crypto.randomUUID(), routes = new Map<string, ApprovedOutboundTarget>()
@@ -87,6 +95,7 @@ export async function startNativeMcpHttp(servers: Record<string, string | McpHtt
     })
   } catch (error) { await request.close(); throw error }
   return {
+    unavailable,
     config: Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, {
       url: server.url.origin + path, http_headers: { 'x-bgs-mcp-token': capability },
     }])),

@@ -1,0 +1,11 @@
+{
+  "defect": "Controlled prototype defect: a stale pause completion restored Paused after Resume",
+  "sourceBefore": "4f43c805e73cf8739a7167da297ce2adb655ee62a3a662d68716441991be8ce8",
+  "sourceAfter": "7f87fae31c24ed0366f9285a46dc7c34cdf8cfbe8950cf17d1b1585fb1d2b351",
+  "patch": {
+    "old_string": "if(state==='Paused')setTimeout(()=>{state='Paused';log('stale-completion');},220);",
+    "new_string": "/* finish is presentation only */"
+  },
+  "owner": "UI transition/state lifecycle",
+  "limitation": "Seeded local regression, not a discovered BGS production bug or autonomous agent repair"
+}

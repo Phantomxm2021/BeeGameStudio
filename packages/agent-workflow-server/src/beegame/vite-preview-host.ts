@@ -358,7 +358,7 @@ export async function startVitePreviewHost(
       // Seatbelt blocks directory watcher events; Vite would otherwise serve
       // stale transformed modules after edits. Keep refresh inside the existing
       // file permissions instead of relying on Agent-requested server restarts.
-      ...(process.env.BGS_SANDBOX === 'seatbelt' ? { watch: { usePolling: true as const } } : {}),
+      ...(process.env.CODEX_SANDBOX === 'seatbelt' ? { watch: { usePolling: true as const } } : {}),
     },
   })
   await server.listen()

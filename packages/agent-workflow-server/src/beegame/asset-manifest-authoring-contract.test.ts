@@ -45,7 +45,7 @@ test('rendered contract describes the modular interface and current tool scope',
   expect(text).toContain('loadable entry **file**')
   expect(text).toContain('BGS-owned roots are fixed')
   expect(text).not.toContain('normally `assets/runtime`')
-  expect(text).toContain('CheckResourcesAndBindings {}')
+  expect(text).toContain('resources.mjs --check')
   expect(text).toContain('no platform requires')
   expect(text).not.toContain('check-content.mjs --current')
   expect(text).not.toContain('This command requires a content index.')

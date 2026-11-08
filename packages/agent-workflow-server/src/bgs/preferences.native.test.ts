@@ -1,10 +1,37 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, writeFile, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { BgsClient } from './client'
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
 
 const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
+nativeTest.each(['legacy-only', 'bgs-only', 'both', 'explicit-config'] as const)(
+  'BGS SQLite directory isolation: %s', async mode => {
+    const root = await mkdtemp('/private/tmp/bgs-sqlite-isolation-')
+    const home = join(root, 'home'), legacy = join(root, 'codex-sqlite'), bgs = join(root, 'bgs-sqlite'), explicit = join(root, 'explicit')
+    let client: BgsClient | undefined
+    try {
+      for (const dir of [home, legacy, bgs, explicit]) await mkdir(dir)
+      await writeFile(join(legacy, 'sentinel.txt'), 'Codex directory must remain untouched')
+      client = await BgsClient.connect({ cwd: root,
+        env: { ...getSafeRuntimeProcessEnvironment(), HOME: home, BGS_HOME: home, OPENAI_API_KEY: 'synthetic-offline-only',
+          ...(mode !== 'bgs-only' ? { CODEX_SQLITE_HOME: legacy } : {}),
+          ...(mode !== 'legacy-only' ? { BGS_SQLITE_HOME: bgs } : {}) },
+        config: { cli_auth_credentials_store: 'file', model_provider: 'offline',
+          ...(mode === 'explicit-config' ? { sqlite_home: explicit } : {}),
+          model_providers: { offline: { name: 'Offline fixture', base_url: 'http://127.0.0.1:9/v1', env_key: 'OPENAI_API_KEY', wire_api: 'responses', request_max_retries: 0, stream_max_retries: 0 } } } })
+      await client.requestNative('config/read', {})
+      await client.close()
+      const selected = mode === 'explicit-config' ? explicit : mode === 'legacy-only' ? home : bgs
+      expect(await readdir(selected)).toContain('state_5.sqlite')
+      expect(await readdir(legacy)).toEqual(['sentinel.txt'])
+      expect(await readFile(join(legacy, 'sentinel.txt'), 'utf8')).toBe('Codex directory must remain untouched')
+      for (const dir of [home, bgs, explicit].filter(dir => dir !== selected)) {
+        expect(await readdir(dir)).not.toContain('state_5.sqlite')
+      }
+    } finally { await client?.close(); await rm(root, { recursive: true, force: true }) }
+  }, 15_000)
+
 nativeTest('pinned Bgs applies reasoning overrides in thread config without a model generation request', async () => {
   const root = await mkdtemp('/private/tmp/bgs-reasoning-native-')
   let client: BgsClient | undefined

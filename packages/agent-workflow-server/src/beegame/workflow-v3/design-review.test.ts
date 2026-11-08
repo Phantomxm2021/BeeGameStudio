@@ -62,7 +62,7 @@ test('an evidence-backed rejection can hand off without unnecessary document cha
   final.authorResponses = [response]
   expect(() => assertDesignReviewReady(source, [initial, final])).not.toThrow()
   delete final.authorResponses
-  expect(() => assertDesignReviewReady(source, [initial, final])).toThrow('exactly one evidence-backed disposition')
+  expect(() => assertDesignReviewReady(source, [initial, final])).not.toThrow()
 })
 
 test('reviewer resolution decides uncertain author responses but cannot excuse new defects or changed sources', () => {
@@ -80,7 +80,7 @@ test('reviewer resolution decides uncertain author responses but cannot excuse n
 test('author responses extend the small final result, never replace the saved draft with a returned body', () => {
   const task = { stage: 'design' as const, originRequestKey: 'synthetic' }
   const value = { status: 'ready', summary: 'Rejected the unsupported finding', reviewResponses: [disposition] }
-  expect(parseProductionResult(task, value, 1, 2)).toMatchObject({ action: 'advance', reviewResponses: [disposition] })
+  expect(parseProductionResult(task, value)).toMatchObject({ action: 'advance', reviewResponses: [disposition] })
   for (const invalid of [{ ...value, document: '# Replacement' },
     { ...value, reviewResponses: [{ ...disposition, finding: 0 }] },
     { ...value, reviewResponses: [{ ...disposition, evidence: '' }] }])
@@ -105,22 +105,21 @@ test('successive revision lists use current indices and retain unresolved issues
 })
 
 
-test('author revision schema and local validation share exact ready coverage while blocked remains available', () => {
+test('author output stays stable while exact evidence coverage belongs to independent review', () => {
   const task = {stage:'design' as const, originRequestKey:'synthetic'}
-  const schema = designAuthorOutputSchema(2)
-  expect(schema.anyOf).toHaveLength(2)
-  expect(schema.anyOf![0]).toMatchObject({required:['status','summary','reviewResponses'],
-    properties:{status:{const:'ready'},reviewResponses:{minItems:2,maxItems:2}}})
-  for (const reviewResponses of [undefined,[],[disposition],[disposition,disposition],[disposition,{...disposition,finding:3}]]) {
-    const value={status:'ready',summary:'Saved revision',reviewResponses}
-    expect(()=>parseProductionResult(task,value,2,3)).toThrow('GDD author round 3')
-  }
-  const value={status:'ready',summary:'Saved revision',reviewResponses:[disposition,{...disposition,finding:2}]}
-  expect(designAuthorResultSchema(2).safeParse(value).success).toBe(true)
-  expect(parseProductionResult(task,value,2,3)).toMatchObject({action:'advance',reviewResponses:value.reviewResponses})
-  expect(designAuthorResultSchema(2).safeParse({status:'blocked',summary:'Needs a user decision'}).success).toBe(true)
-  expect(()=>parseProductionResult(task,{status:'blocked',summary:'Needs a user decision'},2,3)).toThrow('Needs a user decision')
-  expect(parseProductionResult(task,{status:'ready',summary:'Initial saved draft'})).toMatchObject({action:'advance'})
+  const schema = designAuthorOutputSchema()
+  expect(schema).toMatchObject({type:'object',additionalProperties:false,required:['status','summary'],
+    properties:{status:{enum:['ready','blocked']}}})
+  expect(schema.anyOf).toBeUndefined()
+  expect(schema.properties).not.toHaveProperty('reviewResponses')
+  expect(designAuthorOutputSchema(true).properties!.status).toMatchObject({enum:['ready','blocked','answered']})
+  const revision={status:'ready',summary:'Saved revision'}
+  expect(designAuthorResultSchema().safeParse(revision).success).toBe(true)
+  expect(parseProductionResult(task,revision)).toMatchObject({action:'advance',summary:'Saved revision'})
+  expect(designAuthorResultSchema().safeParse({status:'blocked',summary:'Needs a user decision'}).success).toBe(true)
+  expect(()=>parseProductionResult(task,{status:'blocked',summary:'Needs a user decision'})).toThrow('Needs a user decision')
+  const previousNotes={...revision,reviewResponses:[disposition]}
+  expect(parseProductionResult(task,previousNotes)).toMatchObject({reviewResponses:[disposition]})
 })
 
 test('restored receipts retain pending findings, round and no-progress budget and reject broken history', () => {
@@ -138,18 +137,38 @@ test('restored receipts retain pending findings, round and no-progress budget an
   expect(designReviewProgress([first,second,repaired])).toMatchObject({findings:[],bestCount:Infinity,stalled:0})
   const changed=receipt({summary:'A newly changed source has an issue',findings:[finding]})
   expect(designReviewProgress([first,second,repaired,changed])).toMatchObject({findings:[finding],bestCount:1,stalled:0})
-  const corrupt=structuredClone(second);delete corrupt.authorResponses
-  expect(()=>assertDesignReviewReady(source,[first,corrupt,repaired])).toThrow('GDD author round 2')
+  const withoutAuthorNotes=structuredClone(second);delete withoutAuthorNotes.authorResponses
+  expect(()=>assertDesignReviewReady(source,[first,withoutAuthorNotes,repaired])).not.toThrow()
+  const corrupt=structuredClone(second);delete corrupt.report.resolutions
+  expect(()=>assertDesignReviewReady(source,[first,corrupt,repaired])).toThrow('GDD reviewer round 2')
 })
 
 test('coverage errors identify the actor, round and affected numbers without exposing evidence', () => {
   let error=''
-  try {assertDesignReviewCoverage([disposition,disposition,{...disposition,finding:3}],2,'GDD author round 4')}
+  try {assertDesignReviewCoverage([disposition,disposition,{...disposition,finding:3}],2,'GDD reviewer round 4')}
   catch(value){error=(value as Error).message}
-  expect(error).toContain('GDD author round 4')
+  expect(error).toContain('GDD reviewer round 4')
   expect(error).toContain('"missing":[2]')
   expect(error).toContain('"duplicate":[1]')
   expect(error).toContain('"unknown":[3]')
   expect(error).not.toContain(disposition.evidence)
   expect(()=>parseDesignReview(JSON.stringify({summary:'Corrected',findings:[]}),1,4)).toThrow('GDD reviewer round 4')
+})
+
+
+test('three corrected findings require independent evidence, not an author disposition envelope', () => {
+  const initial = receipt({ summary: 'Three source conflicts', findings: [finding,
+    { ...finding, issue: 'Second conflict' }, { ...finding, issue: 'Third conflict' }] })
+  const resolutions = [1, 2, 3].map(id => ({ ...disposition, finding: id }))
+  const checked = receipt(parseDesignReview(JSON.stringify({ summary: 'Saved definitions checked', findings: [], resolutions }), 3, 2))
+  expect(checked.authorResponses).toBeUndefined()
+  expect(() => assertDesignReviewReady(source, [initial, checked])).not.toThrow()
+  for (const invalid of [[], resolutions.slice(0, 2), [resolutions[0], resolutions[0], resolutions[2]],
+    [resolutions[0], resolutions[1], { ...disposition, finding: 4 }]]) {
+    expect(() => parseDesignReview(JSON.stringify({ summary: 'Claims fixed', findings: [], resolutions: invalid }), 3, 2))
+      .toThrow('exactly one evidence-backed disposition')
+  }
+  const unresolved = receipt({ summary: 'Third still conflicts', findings: [],
+    resolutions: resolutions.map(item => item.finding === 3 ? { ...item, status: 'unresolved' } : item) })
+  expect(() => assertDesignReviewReady(source, [initial, unresolved])).toThrow('unresolved review findings')
 })

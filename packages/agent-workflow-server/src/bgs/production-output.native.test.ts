@@ -6,11 +6,11 @@ import {createRun,type AgentTurn} from '../beegame/workflow-v3/state'
 import {productionOutputSchema,parseProductionResult,prepareDesignDocumentHandoff} from '../beegame/workflow-v3/production-workflow'
 
 const nativeTest=process.env.BGS_SANDBOX_TESTS==='1'?test:test.skip
-for(const protocol of ['responses','chat-completions'] as const) nativeTest(
-  protocol+' GDD task keeps Shell read-only, writes its working document and allows ordinary follow-up',async()=>{
+for(const protocol of ['responses','chat-completions'] as const)
+for(const outcome of ['saved','missing-source'] as const) nativeTest(
+  protocol+' GDD final JSON '+outcome+' keeps work unconstrained and validates saved sources',async()=>{
   const root=await mkdtemp('/private/tmp/bgs-production-output-'),game=join(root,'game')
   await mkdir(join(game,'docs'),{recursive:true})
-  await writeFile(join(game,'docs/GDD.md'),'# Synthetic\n## Decisions\nSynthetic design.\n')
   await writeFile(join(game,'board.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
   const run=createRun({projectId:'synthetic',ownerId:'owner',workspacePath:game,chatSessionId:'chat',requestKey:'start',text:'Synthetic scope',constraints:{},ids:['goal']})
   const turn={production:{stage:'design',originRequestKey:'start'}} as AgentTurn
@@ -24,13 +24,12 @@ for(const protocol of ['responses','chat-completions'] as const) nativeTest(
   const followUpProbe=`const fs=require('node:fs'); fs.writeFileSync('visual-note.txt','Authorized follow-up'); let denied=false; try { fs.writeFileSync('docs/GDD.md','Forbidden') } catch {denied=true} if(!denied) throw Error('Protected design write bypassed host'); console.log('Follow-up project write allowed; protected design still denied')`
   const followUpProbeArgs=JSON.stringify({cmd:process.execPath+' -e '+"'"+followUpProbe.replaceAll("'", "'\\''")+"'",max_output_tokens:100})
   let phase=0,nativeSessionId='',preparationRequests=0,followUpRequests=0
-  // Scripted localhost only. Reject API format constraints to model an endpoint
-  // without that capability; a tool call precedes the final JSON response.
+  // Local scripted responses test transport/permissions, not model decision quality.
+  // The final schema is guidance in context; work requests have no API format constraint.
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     if(new URL(request.url).pathname!=='/v1/'+(protocol==='responses'?'responses':'chat/completions'))return new Response('Unexpected route',{status:404})
     const body=await request.json() as any;requests.push(body)
-    if(body.response_format||body.text?.format?.type==='json_schema')return new Response('Unsupported response format',{status:400})
-    const tool=phase ? followUpRequests++ === 0 : preparationRequests++ < 2
+    const tool=outcome==='missing-source'?false:phase ? followUpRequests++ === 0 : preparationRequests++ < 2
     const write=!phase && tool && preparationRequests===2
     const text=phase?'Ordinary follow-up answer':JSON.stringify(result)
     const progress = !phase && tool ? (write ? 'Saving the design document.' : 'Checking project access.') : undefined
@@ -65,8 +64,9 @@ for(const protocol of ['responses','chat-completions'] as const) nativeTest(
   const finalOutput={readOnly:true,writeDocument:{path:'docs/GDD.md',authorize:async()=>{authorizations.push('docs/GDD.md')}},schema,accept:async (value:unknown)=>{
     const request=parseProductionResult(turn.production!,value)
     expect(request).toEqual({action:'advance',summary:result.summary})
+    const handoff=prepareDesignDocumentHandoff(run.workspacePath,request.summary)
     expect(await readFile(join(game,'docs/GDD.md'),'utf8')).toBe(document)
-    handoffs.push(prepareDesignDocumentHandoff(run.workspacePath,request.summary))
+    handoffs.push(handoff)
     return request.summary
   }}
   const startup={sessionId:'production-output-fixture',cwd:game,systemContext:'Synthetic current runtime.',confirmedBriefContext:'Synthetic confirmed brief.',finalOutput,
@@ -78,15 +78,29 @@ for(const protocol of ['responses','chat-completions'] as const) nativeTest(
     }}
   try {
     runtime=await runner.start(startup)
-    await runtime.submit({prompt:'Complete the synthetic preparation assignment.',signal:AbortSignal.timeout(20_000),
+    const submitted=runtime.submit({prompt:'Complete the synthetic preparation assignment.',signal:AbortSignal.timeout(20_000),
       finalOutput,confirmedBriefContext:startup.confirmedBriefContext,onMessage:message=>{events.push(message)},requestPermission:startup.requestPermission})
+    if(outcome==='missing-source'){
+      await expect(submitted).rejects.toThrow('ENOENT')
+      expect(requests).toHaveLength(1)
+      expect(requests[0].text?.format).toBeUndefined()
+      expect(requests[0].response_format).toBeUndefined()
+      expect(handoffs).toEqual([])
+      expect(authorizations).toEqual([])
+      return
+    }
+    await submitted
     expect(requests).toHaveLength(3)
     for(const request of requests){
+      expect(request.text?.format).toBeUndefined()
       expect(request.response_format).toBeUndefined()
-      expect(request.text?.format?.type).not.toBe('json_schema')
+      expect(request.tool_choice).toBe('auto')
       const context=protocol==='responses'?request.input.filter((item:any)=>item.role==='developer').flatMap((item:any)=>item.content.map((part:any)=>part.text)).join('\n'):
         request.messages.filter((item:any)=>item.role==='system').map((item:any)=>item.content).join('\n')
-      for(const marker of [JSON.stringify(schema),startup.systemContext,startup.confirmedBriefContext])
+      expect(context.split(JSON.stringify(schema))).toHaveLength(2)
+      expect(context).toContain('This format applies only to the final answer')
+      expect(context).not.toContain('For ordinary task completion')
+      for(const marker of [startup.systemContext,startup.confirmedBriefContext])
         expect(context.split(marker)).toHaveLength(2)
     }
     expect(permissions.map(request=>request.phase)).toEqual([undefined,'recheck'])
@@ -105,6 +119,10 @@ for(const protocol of ['responses','chat-completions'] as const) nativeTest(
     runtime=await runner.start({...startup,finalOutput:undefined,confirmedBriefContext:followUpBrief,resumeSessionId:nativeSessionId})
     await runtime.submit({prompt:'Create the visual design now.',confirmedBriefContext:followUpBrief,signal:AbortSignal.timeout(20_000),onMessage:message=>{events.push(message)},requestPermission:async()=>({behavior:'deny'})})
     expect(requests).toHaveLength(5)
+    for(const request of requests.slice(3)) {
+      expect(request.response_format).toBeUndefined()
+      expect(request.text?.format?.type).not.toBe('json_schema')
+    }
     expect(nativeSessionId).toBe(originalSessionId)
     expect(await readFile(join(game,'visual-note.txt'),'utf8')).toBe('Authorized follow-up')
     expect(await readFile(join(game,'docs/GDD.md'),'utf8')).toBe(document)
@@ -165,4 +183,78 @@ nativeTest('ordinary native completion can retain a real background PTY until no
     expect(events.some(event=>event.toolName==='Shell'&&event.eventType==='tool.started')).toBe(true)
     expect(events.some(event=>event.eventType==='assistant.message')).toBe(true)
   }finally{await runtime?.dispose?.();server.stop(true);await rm(root,{recursive:true,force:true})}
+},30_000)
+
+for(const protocol of ['responses','chat-completions'] as const)
+for(const entry of ['native','cli'] as const) nativeTest(protocol+' implementation ready '+entry+' stops author sampling after acknowledged handoff',async()=>{
+  const {openAgentTools}=await import('../beegame/workflow-v3/agent-tools')
+  const root=await mkdtemp('/private/tmp/bgs-ready-handoff-'),game=join(root,'game')
+  await mkdir(game)
+  let ready:string|undefined,committed=0,calls=0,postReady=0,nativeId=''
+  const events:any[]=[],requests:any[]=[],usage:any[]=[]
+  const tools=await openAgentTools({workspacePath:game,sessionId:'ready-fixture',getAuthToken:()=>undefined,
+    workflow:async value=>{
+      expect(value).toEqual({action:'advance',summary:'Runnable fixture; behavior verification remains.',sections:[],files:[]})
+      committed++;ready='Runnable fixture; behavior verification remains.'
+      return {request:value,next:{stage:'verification'},sources:[]}
+    }})
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET')return new Response(null,{status:404})
+    const body=await request.json() as any;requests.push(body)
+    if(ready){
+      postReady++
+      // The next model response would continue browser self-testing. Hold it
+      // as an actual in-flight request: the host must cancel without its answer.
+      await new Promise<void>(resolve=>{if(request.signal.aborted)resolve();else request.signal.addEventListener('abort',()=>resolve(),{once:true})})
+      return new Response(null,{status:499})
+    }
+    calls++
+    if(calls>2)return Response.json({error:{message:'Unexpected fixture continuation'}},{status:400})
+    const background=calls===1
+    const name=background||entry==='cli'?'exec_command':'BgsWorkflow'
+    const command=background
+      ? {cmd:process.execPath+" -e 'setInterval(()=>{},1000)'",yield_time_ms:1000,max_output_tokens:30}
+      : {cmd:process.execPath+' '+JSON.stringify(join(tools.directory,'workflow.mjs'))+' --advance '+"'"+JSON.stringify({summary:'Runnable fixture; behavior verification remains.',sections:[],files:[]})+"'",yield_time_ms:10000,max_output_tokens:1000}
+    const args=name==='exec_command'?command:{action:'advance',summary:'Runnable fixture; behavior verification remains.',sections:[],files:[]}
+    const item={id:'fc-'+calls,type:'function_call',call_id:'call-'+calls,name,arguments:JSON.stringify(args),status:'completed'}
+    if(protocol==='chat-completions')return new Response([
+      {choices:[{index:0,delta:{tool_calls:[{index:0,id:item.call_id,type:'function',function:{name,arguments:item.arguments}}]},finish_reason:null}]},
+      {choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:100,completion_tokens:20}},
+    ].map(x=>'data: '+JSON.stringify(x)+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}})
+    const response={id:'response-'+calls,object:'response',status:'completed',output:[item],usage:{input_tokens:100,output_tokens:20,total_tokens:120}}
+    return new Response([{type:'response.created',response:{...response,status:'in_progress',output:[]}},
+      {type:'response.output_item.added',output_index:0,item}, {type:'response.output_item.done',output_index:0,item},
+      {type:'response.completed',response}].map((x,sequence_number)=>'data: '+JSON.stringify({...x,sequence_number})+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}})
+  }})
+  const runner=createBgsRunner({resolveOutboundTarget:async value=>{
+    const url=new URL(value);if(url.origin!==server.url.origin)throw Error('Non-local fixture request forbidden')
+    return {url,addresses:['127.0.0.1'],lookup:(_h,_o,cb)=>cb(null,'127.0.0.1',4)}
+  }})
+  let runtime:Awaited<ReturnType<typeof runner.start>>|undefined
+  try{
+    const capability={workflow:tools.workflow,implementationHandoff:()=>ready}
+    runtime=await runner.start({...capability,sessionId:'ready-fixture',cwd:game,
+      onNativeSessionId:id=>{nativeId=id},onNativeUsage:value=>{usage.push(value)},
+      env:{BEEGAME_CONFIG_DIR:join(root,'private'),OPENAI_API_KEY:'fixture-only',BEEGAME_API_PROTOCOL:protocol,OPENAI_BASE_URL:server.url.origin+'/v1',BEEGAME_MODEL:'fixture-unknown-model'},
+      requestPermission:async()=>({behavior:'deny'})})
+    await runtime.submit({...capability,prompt:'Run the supplied background command, then submit the supplied readiness operation.',
+      signal:AbortSignal.timeout(20_000),onMessage:event=>{events.push(event)},requestPermission:async()=>({behavior:'deny'})})
+    expect(committed).toBe(1);expect(calls).toBe(2);expect(postReady).toBeLessThanOrEqual(1)
+    expect(usage.at(-1)?.total_tokens).toBe(240)
+    expect(events.some(e=>e.eventType==='assistant.message'&&e.text===ready)).toBe(true)
+    const lifecycle=events.filter(e=>e.eventType==='tool.started'||e.eventType==='tool.completed'||e.eventType==='tool.failed')
+    const readyEnd=lifecycle.find(e=>e.eventType==='tool.completed'&&(entry==='native'?e.toolName==='BgsWorkflow':e.toolName==='Shell'&&String(e.output).includes('verification')))
+    expect(readyEnd).toBeDefined()
+    if(entry==='cli')expect(readyEnd.exitCode).toBe(0)
+    expect(lifecycle.filter(e=>e.eventType==='tool.started').every(start=>lifecycle.some(e=>e.toolUseID===start.toolUseID&&e.eventType!=='tool.started'))).toBe(true)
+    const {readdir}=await import('node:fs/promises')
+    const files=await readdir(root,{recursive:true})
+    const rollout=files.find(p=>p.endsWith(nativeId+'.jsonl'))!
+    const history=await readFile(join(root,rollout),'utf8')
+    const saved=history.trim().split('\n').map(line=>JSON.parse(line))
+    const result=saved.find(row=>row.type==='response_item'&&row.payload.type==='function_call_output'&&JSON.stringify(row.payload.output).includes('verification'))
+    expect(result).toBeDefined()
+    expect(JSON.stringify(result.payload.output)).toContain('next')
+    expect(events.some(e=>e.text==='BGS turn interrupted')).toBe(false)
+  }finally{await runtime?.dispose?.();await tools.close();server.stop(true);await rm(root,{recursive:true,force:true})}
 },30_000)

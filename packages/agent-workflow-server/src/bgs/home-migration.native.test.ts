@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -6,7 +7,8 @@ import { migrateBgsHome } from '../../../../scripts/migrate-bgs-home'
 
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' && process.env.BGS_LEGACY_BINARY ? test : test.skip
 localTest('a pre-branding native session resumes from the migrated BGS home without rewriting its history', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-home-resume-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-home-resume-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   const privateRoot = join(root, 'private'), legacy = join(privateRoot, 'codex'), home = join(privateRoot, 'bgs')
   await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true }); await mkdir(legacy, { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline migration fixture.\n---\nFixture.')
@@ -36,7 +38,7 @@ localTest('a pre-branding native session resumes from the migrated BGS home with
       runtime = await runner.start({ sessionId: 'migration-fixture', cwd: game,
         ...(old ? {} : { resumeSessionId: thread }),
         env: { BEEGAME_CONFIG_DIR: privateRoot, BGS_HOME: old ? legacy : home, HOME: root,
-          ...(old ? { CODEX_HOME: legacy } : {}), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+          ...(old ? { CODEX_HOME: legacy } : {}), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
         onNativeSessionId: id => { if (thread) expect(id).toBe(thread); thread = id },
         requestPermission: async () => ({ behavior: 'deny' }) })

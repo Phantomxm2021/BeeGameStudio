@@ -148,13 +148,13 @@ export function createBeeGameResourceServerApp(
         const catalogRequest = parseCatalogRequest(await request.json())
         // Use the same readiness as element browsing. The SQL summary omits
         // unresolved external references and can otherwise overstate counts.
-        const packs = (await options.repository.listPacks()).filter(pack => pack.status === 'published')
+        const packs = (await options.repository.listPacks({ includeCover: false })).filter(pack => pack.status === 'published')
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
         return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
       }
       if (request.method === 'POST' && pathname === '/api/resource-catalog/matches') {
         const matchRequest = parseResourceRequirementMatchRequest(await request.json())
-        const packs = await options.repository.listPacks()
+        const packs = await options.repository.listPacks({ includeCover: false })
         const publishedPacks = packs.filter(pack => pack.status === 'published')
         const elements = (await Promise.all(
           publishedPacks.map(pack => options.repository.listElements(pack.id)),
@@ -192,7 +192,7 @@ export function createBeeGameResourceServerApp(
                 'Resource download URLs are not configured',
               ), options.corsOrigin)
         const requested = parseResourceSelections(await request.json())
-        const publishedPacks = (await options.repository.listPacks())
+        const publishedPacks = (await options.repository.listPacks({ includeCover: false }))
           .filter(pack => pack.status === 'published')
         const publishedElements = (await Promise.all(
           publishedPacks.map(pack => options.repository.listElements(pack.id)),

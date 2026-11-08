@@ -1,0 +1,22 @@
+[
+  {
+    "at": 1793438174229,
+    "type": "click",
+    "name": "Start"
+  },
+  {
+    "at": 1793438174440,
+    "type": "click",
+    "name": "Restart"
+  },
+  {
+    "at": 1793438174441,
+    "type": "down",
+    "code": "ArrowRight"
+  },
+  {
+    "at": 1793438175444,
+    "type": "up",
+    "code": "ArrowRight"
+  }
+]

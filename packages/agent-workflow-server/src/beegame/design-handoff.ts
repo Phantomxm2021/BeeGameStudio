@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { designSourceLocations } from './design-source-reading'
 import { designDocumentSections, renderDesignHeading } from './design-document-sections'
 import { checkCalculationResult } from './balance-calculation.mjs'
 import { readCalculationInputs } from './balance-calculation'
@@ -588,41 +587,4 @@ export function readDesignAcceptanceRequirements(workspace: string) {
   const issues = implementationIssues(indexes)
   if (issues.length) throw new Error(issues.join('; '))
   return requirements
-}
-/** Current pointers only, not another authority or semantic verdict. This
- * replaces serial metadata reads; the reviewer still reads the saved prose
- * and actual evidence. Malformed indexes retain the host's revision path. */
-export function designReviewIndexes(workspace: string, documents: readonly string[], scope?: Record<string, string[] | null>) {
-  return documents.map(name => {
-    if (!PROJECT_DOCUMENTS.some(document => document === name)) throw new Error('Unknown design document')
-    try {
-      const body = readRetained(workspace, `docs/${name}`).toString('utf8')
-      const { handoff, issues } = documentHandoff(workspace, name as DesignDocument, body, true)
-      const headings = scope?.[name]
-      const sections = designDocumentSections(body)
-      // Unknown/moved headings keep the full source fallback, just as the
-      // reading contract does. [] explicitly selects no mandatory material.
-      const full = headings === undefined || headings === null || headings.some(heading =>
-        sections.filter(section => section.heading === heading).length !== 1)
-      const selected = sections.filter(section => headings?.includes(section.heading))
-      const includes = (heading: string) => full || sections.some(section => section.heading === heading &&
-        selected.some(source => source.start <= section.end && section.start <= source.end))
-      // Give native Read its actual source coordinates. Do not force the model
-      // to grep headings or parse tool archives just to locate assigned text.
-      // These hints never count as having read the file, and edits invalidate them.
-      const ranges: { offset: number; limit: number }[] = []
-      const sourceRanges = full ? [{ start: 1, end: body.replace(/\r(?=\n|$)/g, '').split('\n').length }] : selected
-      for (const section of [...sourceRanges].sort((a, b) => a.start - b.start)) {
-        const previous = ranges.at(-1)
-        if (previous && section.start <= previous.offset + previous.limit)
-          previous.limit = Math.max(previous.offset + previous.limit - 1, section.end) - previous.offset + 1
-        else ranges.push({ offset: section.start, limit: section.end - section.start + 1 })
-      }
-      return { document: name, ...(issues.length ? { issues } : {}), sourceReads: ranges.map(range => ({ file_path: 'docs/' + name, ...range })),
-        outputs: handoff.outputs.filter(output => includes(output.section) ||
-          !!output.acceptance && includes(output.acceptance.section)),
-        ...(handoff.implementationItems ? { implementationItems: handoff.implementationItems.filter(item => includes(item.section)) } : {}),
-        evidence: full || selected.length ? handoff.evidence.map(({ sha256: _hash, ...source }) => source) : [] }
-    } catch { return { document: name, unavailable: 'Index unavailable/malformed; use the host structural revision scope, not invented pointers.' } }
-  })
 }

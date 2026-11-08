@@ -1,3 +1,6 @@
+import { createMeasurementInputReader, inspectAgentMeasurementInputs, selectAgentMeasuredBuild } from './measured-build'
+import { readArtifactSnapshot } from '../runtime-acceptance'
+import { EDITABLE_BUILD_CHECK_VERSION, CHECK_VERSIONS } from './check-versions'
 import { resolve } from 'node:path'
 import { test, expect } from 'bun:test'
 import sharp from 'sharp'
@@ -9,7 +12,7 @@ import { createRun, digest, type AgentTurn } from './state'
 import { createLocalWorkflowStore } from './store'
 import { measurementSummary } from './agent-measurement'
 import * as editableProject from './editable-project'
-import {createMeasuredPreview} from './measured-preview'
+import {createStaticPreview} from './static-preview'
 import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {createAgentWorkflowApp} from '../../app'
 
@@ -150,7 +153,7 @@ test.each([false,true])('V3 ordinary deployment rebuilds current sources without
 
 test('fresh publication rebuilds current sources independently of old discussion confirmations',async()=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
-  const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),
+  const preview=createStaticPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),
     readRun:f.current,isBusy:()=>false})
   let published=0
   try {
@@ -325,4 +328,37 @@ test('publication cover options capture three frames from an owned current Previ
     rejectCapture = false; mutate = true
     expect((await post(url, { count: 3 })).status).toBe(409)
   } finally { for (const cleanup of cleanups) await cleanup(); await f.close() }
+})
+
+
+test('one measurement response shares disk facts but retains purpose-specific decisions and refreshes the next request',async()=>{
+  const f=await fixture()
+  try{
+    await mkdir(join(f.workspace,'dist'))
+    await writeFile(join(f.workspace,'dist/index.html'),'Saved fixture')
+    const snapshot=await readArtifactSnapshot(f.workspace,'dist'),artifact={path:'dist',sha256:snapshot.sha256}
+    const files=await editableProject.projectFiles(f.workspace,'dist',[])
+    const at=new Date().toISOString(),run=structuredClone(f.run)
+    delete run.writer
+    const build:import('./state').CheckResult={id:'build',version:EDITABLE_BUILD_CHECK_VERSION,status:'passed',inputs:files,artifacts:[artifact],observation:'Saved build',createdAt:at,
+      projectBuild:{version:EDITABLE_BUILD_CHECK_VERSION,files,excludedReports:[],artifact,runtime:'fixture'}}
+    const smoke:import('./state').CheckResult={id:'runtime-smoke',version:CHECK_VERSIONS['runtime-smoke'],status:'passed',inputs:[...snapshot.files].map(([path,sha256])=>({path,sha256})),artifacts:[artifact],coverage:{files:[...snapshot.files.keys()],limitations:[]},observation:'Saved smoke',createdAt:at}
+    const measurement:import('./state').AgentMeasurement={id:crypto.randomUUID(),requestKey:'saved',runtimeArtifact:'dist',reportPaths:[],reports:[],requirementsRevision:run.requirements.revision,startedAt:at,finishedAt:at,
+      consumption:{checks:['audio-data-consumption']},checks:[build,smoke,{id:'audio-data-consumption',version:CHECK_VERSIONS['audio-data-consumption'],status:'unverified',inputs:[],observation:'Not observed',createdAt:at}]}
+    run.agentTurns![0]!.status='ended';run.agentTurns![0]!.quiescedAt=at;run.agentTurns![0]!.measurements=[measurement]
+    const readInputs=createMeasurementInputReader(run,measurement)
+    const first=readInputs(build,smoke,build.projectBuild!,artifact)
+    expect(readInputs(build,smoke,build.projectBuild!,artifact)).toBe(first)
+    await first
+    const delivery=await inspectAgentMeasurementInputs(run,measurement,undefined,'delivery',readInputs)
+    expect(delivery.current).toBe(false)
+    await expect(selectAgentMeasuredBuild(run,measurement.id,false,'delivery',undefined,readInputs)).rejects.toThrow()
+    const preview=await selectAgentMeasuredBuild(run,measurement.id,false,'preview',undefined,readInputs)
+    expect(preview.artifact).toEqual(artifact)
+    expect(preview.limitations.join(' ')).toContain('audio-data-consumption')
+    await writeFile(join(f.workspace,'README.md'),'Changed source')
+    const next=await inspectAgentMeasurementInputs(run,measurement,undefined,'preview')
+    expect(next.current).toBe(false)
+    expect('changes' in next && next.changes.sources).toContain('README.md')
+  }finally{await f.close()}
 })

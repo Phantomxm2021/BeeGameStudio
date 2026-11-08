@@ -12,11 +12,30 @@ import { imageChargeCreditsMicro, fixedImageChargeCreditsMicro, CLOUDFLARE_INITI
 import { ImageProviderError } from './provider'
 import { createImageGenerationProvider } from './index'
 import { writeProjectAssetCommand } from '../beegame/project-asset-command'
-import { openImageGenerationAccess } from './access'
+import { createImageGenerationAccess } from './access'
+
+function openImageGenerationAccess(input: Parameters<typeof createImageGenerationAccess>[0]) {
+  const access = createImageGenerationAccess(input)
+  const path='/'+crypto.randomUUID()+'/generate'
+  const server = Bun.serve({hostname:'127.0.0.1',port:0,idleTimeout:0,maxRequestBodySize:256*1024,
+    fetch:request=>new URL(request.url).pathname===path ? access.fetch(request) : new Response('Not found',{status:404})})
+  return {...access,endpoint:server.url.origin+path,close(){access.close();return server.stop(false)}}
+}
+
 import { ImageConfigurationError } from './runtime-config'
 import { imagePromptReviewInput, parseImagePromptReview } from './prompt-review'
 import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
+import { readProjectReferenceImage, renderUiReferenceLayout } from './reference-image'
 import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from '../beegame/asset-contracts'
+
+async function retainHistoricalUiReceipt(service:ImageGenerationService,root:string,value:any,settings=config) {
+  const compiled=value.uiReference!==undefined?compileUiReferenceBoard(value):compileUiAssetSheet(value)
+  const {requestId,purpose,requirementIds,referenceImagePath,...request}={...compiled.request,purpose:value.purpose,requirementIds:value.requirementIds}
+  const referenceImage=referenceImagePath?await readProjectReferenceImage(root,referenceImagePath)
+    :value.uiReference!==undefined?await renderUiReferenceLayout(compiled.layout):undefined
+  return service.generate({ownerId:'owner',projectId:'project',requestId:requestId!,config:settings,
+    request:{...request,...(referenceImage?{referenceImage}:{})}})
+}
 
 test.each(['platform', 'byok'] as const)('resource intent rejects new incompatible requests before billing/provider and does not alter recovery: %s', async source => {
   const root = mkdtempSync(join(tmpdir(), 'image-resource-intent-'))
@@ -67,6 +86,58 @@ test.each(['platform', 'byok'] as const)('resource intent rejects new incompatib
   } finally { await access.close(); rmSync(root,{recursive:true,force:true}) }
 })
 
+test('image parameter errors identify the failing fields without creating attempts, charges or provider work', async () => {
+  const root = mkdtempSync(join(tmpdir(),'image-parameter-errors-'))
+  const billing = fakeBilling()
+  let configurations = 0, calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root,'host'),{generate:async()=>{
+    calls++;return {bytes:await png(),model:config.model,mimeType:'image/png',usage}
+  }}),billing.client)
+  const access = openImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,
+    loadConfig:async()=>{configurations++;return config},service})
+  const request = {requestId:'parameter-error',purpose:'production',prompt:'Private artwork prompt'}
+  const send = (value:unknown)=>fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(value)})
+  try {
+    for (const [value,path,code] of [
+      [{...request,requirementIds:[]},['requirementIds'],'too_small'],
+      [{...request,requirementIds:['']},['requirementIds',0],'too_small'],
+      [{...request,quality:'unknown'},['quality'],'invalid_value'],
+      [{...request,requestId:undefined},['requestId'],'invalid_type'],
+      [{...request,prompt:''},['prompt'],'too_small'],
+      [{...request,providerKey:'fixture-private-value'},[],'unrecognized_keys'],
+      [{...request,uiReference:{}},[],'custom'],
+    ] as const) {
+      const response = await send(value)
+      expect(response.status).toBe(400)
+      const body = await response.json()
+      expect(body).toMatchObject({error:'Invalid image request',issues:expect.arrayContaining([{path:[...path],code,message:expect.any(String)}])})
+      expect(JSON.stringify(body)).not.toContain(request.prompt)
+      expect(JSON.stringify(body)).not.toContain('fixture-private-value')
+    }
+    expect(configurations).toBe(0);expect(calls).toBe(0);expect(billing.actions).toEqual([])
+    expect(existsSync(join(root,'host'))).toBe(false)
+    expect(existsSync(join(root,'assets/ai-generation-prompts.md'))).toBe(false)
+    // The existing command must preserve the same HTTP field diagnostic for the Agent.
+    const script = join(root,'images.mjs'), requestFile = join(root,'request.json')
+    await writeProjectAssetCommand(script,{imageEndpoint:access.endpoint})
+    writeFileSync(requestFile,JSON.stringify({...request,requirementIds:[]}))
+    const child = Bun.spawn([process.execPath,script,'generate',requestFile,'assets/rejected.png'],{cwd:root,
+      stdout:'pipe',stderr:'pipe',env:{...process.env,BEEGAME_ASSET_CAPABILITY_FILE:''}})
+    const [stdout,stderr,code] = await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
+    expect(code).toBe(1)
+    expect(stdout+stderr).toContain('Capability HTTP 400')
+    expect(stdout+stderr).toContain('"path":["requirementIds"]')
+    expect(stdout+stderr).toContain('"code":"too_small"')
+    expect(calls).toBe(0);expect(billing.actions).toEqual([])
+    expect(existsSync(join(root,'assets/rejected.png'))).toBe(false)
+    // Correct only the empty association; retain the purpose, prompt and original request ID.
+    const corrected = await send(request)
+    expect(corrected.status).toBe(200);await corrected.arrayBuffer()
+    expect(calls).toBe(1)
+    expect(billing.actions).toEqual(['reserve','settle'])
+  } finally {await access.close();rmSync(root,{recursive:true,force:true})}
+})
+
 test.each(['platform', 'byok'] as const)('final compiled prompt is checked before image billing; corrections and paid recovery: %s', async source => {
   const root = mkdtempSync(join(tmpdir(), 'image-prompt-check-'))
   const billing = fakeBilling(), checked: string[] = [], reviewInputs: string[] = []
@@ -84,17 +155,14 @@ test.each(['platform', 'byok'] as const)('final compiled prompt is checked befor
       checked.push(prompt)
       return review
     } })
-  const request = { purpose: 'reference', requestId: 'prompt-check', uiReference: { viewport: { width: 1280, height: 720 },
-    style: 'Background uses blue only', screens: [{ id: 'ready', description: 'Ready screen with a red background' }] } }
+  const request = {purpose:'reference',requestId:'prompt-check',prompt:'Background uses blue only. Ready screen with a red background'}
   const send = () => fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) })
   try {
     const rejected = await send()
     expect(rejected.status).toBe(422)
     expect(await rejected.json()).toMatchObject({ code: 'image-prompt-conflict', requestId: request.requestId })
     expect(checked).toHaveLength(1)
-    expect(checked[0]).toContain('Create a visual reference board')
-    expect(checked[0]).toContain(request.uiReference.style)
-    expect(checked[0]).toContain(request.uiReference.screens[0]!.description)
+    expect(checked[0]).toBe(request.prompt)
     const firstInput = JSON.parse(reviewInputs[0]!)
     expect(Object.keys(firstInput).sort()).toEqual(['confirmedRequirements', 'design', 'prompt'])
     expect(firstInput.confirmedRequirements).toBe('Confirmed user requirements')
@@ -107,7 +175,7 @@ test.each(['platform', 'byok'] as const)('final compiled prompt is checked befor
     expect(calls).toBe(0)
     expect(billing.actions).toEqual([])
     review = { issues: [] }
-    request.uiReference.screens[0]!.description = 'Ready screen with a blue background'
+    request.prompt = 'Background uses blue only. Ready screen with a blue background'
     const currentDesign = design + 'Preserve the paper material.\n'
     writeFileSync(join(root, 'docs/GDD.md'), currentDesign)
     const generated = await send()
@@ -208,7 +276,7 @@ test('a pre-metadata paid receipt is recoverable through the new bridge', async 
   } finally { await access.close();rmSync(root,{recursive:true,force:true}) }
 })
 
-test('host compiles screen revisions with original image bytes, records the prompt and rejects invalid inventory/orientation', async () => {
+test('saved screen revisions recover original bytes; new structured requests and invalid inventory are rejected', async () => {
   const root = mkdtempSync(join(tmpdir(), 'image-ui-board-'))
   const billing = fakeBilling(), received: unknown[] = []
   const design = await png()
@@ -238,6 +306,9 @@ test('host compiles screen revisions with original image bytes, records the prom
     expect((await submit({ ...input, referenceImagePath: 'assets/reference/missing.png' })).status).toBe(400)
     expect(received).toEqual([])
     expect(billing.actions).toEqual([])
+    expect((await submit(input)).status).toBe(422)
+    expect(received).toEqual([]);expect(billing.actions).toEqual([])
+    await retainHistoricalUiReceipt(service,root,input,cloudflareConfig)
     const response = await submit(input)
     expect(response.status).toBe(200)
     await response.arrayBuffer()
@@ -249,11 +320,14 @@ test('host compiles screen revisions with original image bytes, records the prom
     expect(received[0]).not.toHaveProperty('uiReference')
     const record = readFileSync(join(root, 'assets/ai-generation-prompts.md'), 'utf8')
     expect(record).toContain(JSON.stringify(expected.prompt))
-    expect(billing.actions).toEqual(['reserve', 'settle'])
+    expect(billing.actions).toEqual(['reserve','settle','reserve','settle'])
+    const changed=await submit({...input,uiReference:{...input.uiReference,style:'A different composition'}})
+    expect(changed.status).toBe(409)
+    expect(received).toHaveLength(1)
   } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
 })
 
-test('UI skin generation passes the selected design bytes to the provider; missing designs never reach billing', async () => {
+test('saved UI skins recover their original selected design; new structured skins never reach billing', async () => {
   const root = mkdtempSync(join(tmpdir(), 'image-ui-skins-')), billing = fakeBilling(), received: any[] = []
   const design = await png()
   mkdirSync(join(root, 'assets/visual'), { recursive: true }); writeFileSync(join(root, 'assets/visual/design.png'), design)
@@ -272,6 +346,9 @@ test('UI skin generation passes the selected design bytes to the provider; missi
     expect((await send({ ...input, referenceImagePath: undefined })).status).toBe(400)
     expect((await send({ ...input, referenceImagePath: 'assets/visual/missing.png' })).status).toBe(400)
     expect(received).toEqual([]); expect(billing.actions).toEqual([])
+    expect((await send(input)).status).toBe(422)
+    expect(received).toEqual([]);expect(billing.actions).toEqual([])
+    await retainHistoricalUiReceipt(service,root,input,cloudflareConfig)
     const response = await send(input)
     expect(response.status).toBe(200); await response.arrayBuffer()
     expect(received).toHaveLength(1)
@@ -279,7 +356,7 @@ test('UI skin generation passes the selected design bytes to the provider; missi
     expect(received[0].prompt).toBe(compileUiAssetSheet(input).request.prompt)
     expect(received[0].background).toBe('transparent')
     expect(received[0]).not.toHaveProperty('uiAssets')
-    expect(billing.actions).toEqual(['reserve', 'settle'])
+    expect(billing.actions).toEqual(['reserve','settle','reserve','settle'])
   } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -304,9 +381,7 @@ test('one image capability continues from a screen design into UI skins and game
   const send = (value: unknown) => fetch(access.endpoint, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) })
   try {
-    const design = await send({ requestId: 'screen', purpose: 'reference', uiReference: {
-      viewport: { width: 800, height: 600 }, style: 'Confirmed visual direction',
-      screens: [{ id: 'play', description: 'Complete scene, character, prop and HUD' }] } })
+    const design = await send({requestId:'screen',purpose:'reference',quality:'low',prompt:'Confirmed visual direction: complete scene, character, prop and HUD'})
     expect(design.status).toBe(200)
     mkdirSync(join(root, 'assets/reference'), { recursive: true })
     const referenceImagePath = 'assets/reference/selected.png'
@@ -324,8 +399,7 @@ test('one image capability continues from a screen design into UI skins and game
         dimensions: ['2D' as const], asset_kinds: ['sprite' as const], styles: [] } })),
     ] })
     const requests = [
-      { requestId: 'ui', requirementIds: ['ui'], uiAssets: { elements: [
-        { id: 'control', description: 'Selected control skin without live text', width: 160, height: 48 } ] } },
+      {requestId:'ui',requirementIds:['ui'],prompt:'UI atlas with the selected control skin, without live text',background:'transparent'},
       ...['character', 'prop'].map(id => ({ requestId: id, requirementIds: [id],
         prompt: `Isolated ${id} matching the selected design`, background: 'transparent' })),
     ]
@@ -472,9 +546,7 @@ test('reference defaults stay local while production honors explicit and configu
     expect(response.status).toBe(200)
     await response.arrayBuffer()
   }
-  const reference = { purpose: 'reference', requestId: 'reference', uiReference: {
-    viewport: { width: 1280, height: 720 }, style: 'Original artwork',
-    screens: [{ id: 'play', description: 'The required player view' }] } }
+  const reference={purpose:'reference',requestId:'reference',quality:'low',prompt:'Original artwork: the required player view'}
   try {
     expect(await (await fetch(access.endpoint)).json()).toMatchObject({ available: true, quality: 'medium' })
     expect(await (await fetch(access.endpoint + '?quality=high')).json()).toMatchObject({ available: true, quality: 'high' })
@@ -964,9 +1036,7 @@ test('one live image capability follows provider changes for layout guides and s
         : provider === 'openrouter' ? 'https://gateway.example/api/v1/images' : 'https://gateway.example/v1/images/generations' }
       const response = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ requestId: 'switch-' + index, purpose: 'reference',
-          ...(index % 2 ? { referenceImagePath: 'assets/reference/design.png' } : {}),
-          uiReference: { viewport: { width: 1280, height: 720 }, style: 'Shared visual identity',
-            screens: [{ id: 'play', description: 'Actual gameplay state' }] } }) })
+          referenceImagePath:'assets/reference/design.png',prompt:'Shared visual identity: actual gameplay state' }) })
       expect(response.status).toBe(200)
       expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes)
       const item = received.at(-1)!
@@ -976,12 +1046,7 @@ test('one live image capability follows provider changes for layout guides and s
       const data = provider === 'cloudflare' ? item.body.input.images[0]
         : provider === 'openrouter' ? item.body.input_references[0].image_url.url : item.body.images[0].image_url
       const reference = Buffer.from(data.split(',')[1], 'base64')
-      if (index % 2) expect(reference).toEqual(bytes)
-      else {
-        const metadata = await sharp(reference).metadata()
-        expect(metadata.format).toBe('png')
-        expect(metadata.width).toBeGreaterThan(2)
-      }
+      expect(reference).toEqual(bytes)
     }
     expect(received).toHaveLength(4)
     expect(billing.actions).toEqual([])
@@ -1032,8 +1097,7 @@ test.each(['platform', 'byok'] as const)('new artwork needs no empty registry, w
     const produced = await send('new-art')
     expect(produced.status).toBe(200)
     writeFileSync(join(root,'assets/design.png'),Buffer.from(await produced.arrayBuffer()))
-    const skins=await send('new-skins',{prompt:undefined,referenceImagePath:'assets/design.png',
-      uiAssets:{elements:[{id:'panel',description:'The supplied panel skin',width:240,height:120}]}})
+    const skins=await send('new-skins',{referenceImagePath:'assets/design.png',prompt:'UI atlas: the supplied panel skin, without text'})
     expect(skins.status).toBe(200)
     await skins.arrayBuffer()
     expect(calls).toBe(2)

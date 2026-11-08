@@ -1,3 +1,4 @@
+import { artifactDigest, readArtifactSnapshot } from '../runtime-acceptance'
 import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, cp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -191,4 +192,32 @@ test('artifact aliases/escapes and cancellation are not accepted or allowed to w
     const noDriver = await runArtifactCheck(root, 'runtime-smoke', { ...artifactTask, runtimeArtifact: undefined }, [], {})
     expect(noDriver.status).toBe('unverified')
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
+})
+
+
+test('one artifact snapshot preserves the saved directory hash and every file while detecting changes and aliases',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-artifact-snapshot-'))
+  try{
+    await mkdir(join(root,'dist/assets'),{recursive:true});await mkdir(join(root,'dist/empty'))
+    await writeFile(join(root,'dist/index.html'),'<html>fixture</html>')
+    await writeFile(join(root,'dist/assets/Z.js'),'Z');await writeFile(join(root,'dist/assets/a.js'),'a')
+    const before=await readArtifactSnapshot(root,'dist')
+    // Golden identity uses the existing directory/name/hash serialization, including empty directories.
+    expect(before.sha256).toBe('30143dab8994e5b327bd5902e7178b141e4978a821812fc1533a6f4e11b059e4')
+    expect(before.sha256).toBe(await artifactDigest(root,'dist',true))
+    expect([...before.files.keys()]).toEqual(['dist/assets/Z.js','dist/assets/a.js','dist/index.html'])
+    await writeFile(join(root,'dist/empty/new.txt'),'new')
+    expect((await readArtifactSnapshot(root,'dist')).sha256).not.toBe(before.sha256)
+    await rm(join(root,'dist/empty/new.txt'))
+    expect((await readArtifactSnapshot(root,'dist')).sha256).toBe(before.sha256)
+    await writeFile(join(root,'dist/assets/a.js'),'changed')
+    expect((await readArtifactSnapshot(root,'dist')).files.get('dist/assets/a.js')).not.toBe(before.files.get('dist/assets/a.js'))
+    await symlink(join(root,'dist/index.html'),join(root,'dist/alias'))
+    await expect(readArtifactSnapshot(root,'dist')).rejects.toThrow('symlinks')
+    // General historical identity still supports safe in-workspace aliases.
+    expect(await artifactDigest(root,'dist',true)).toEqual(expect.any(String))
+    await expect(readArtifactSnapshot(root,'dist/index.html')).rejects.toThrow('directory')
+    await expect(readArtifactSnapshot(root,'../outside')).rejects.toThrow('workspace-relative')
+    await expect(readArtifactSnapshot(root,'missing')).rejects.toMatchObject({code:'ENOENT'})
+  }finally{await rm(root,{recursive:true,force:true})}
 })

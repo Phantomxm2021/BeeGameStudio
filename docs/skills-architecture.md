@@ -4,7 +4,15 @@
 
 后续体验工作顺序修订以 `415c7c85c` 为基线，见文末；前面的加载链研究与测试记录保留各自范围。
 
-## 当前实际执行链
+## 当前原生安装结构（2026-11-08）
+
+BGS 专业库源包位于 [`.beegame/plugins/bgs-game-development`](../.beegame/plugins/bgs-game-development/README.md)，18 个专业 Skill 随 `bgs-game-development@bgs-professional` 原生 Plugin 安装。宿主先准备该账户的原生 marketplace/plugin；原生 Skills 目录列出命名空间元数据，Agent 按需读取正文与引用。BGS 不再调用 `skills/extraRoots/set` 或附加专业正文。
+
+SaaS 的只读源包可共享；账户的 `BGS_HOME`、安装缓存和用户上传的 `BGS_HOME/skills` 分别隔离。客户端使用 BGS 自有目录，不写个人 Codex 配置。恢复复用已有安装与禁用选择。Plugin 目录是唯一源包，不再创建旧 Skills 源路径链接。历史线程保留原生会话和安装缓存，按原生目录返回的安装路径继续；不重写历史 Shell 中的旧源地址，也不为它扩大沙箱权限。
+
+## 2026-10-23 执行链与后续历史记录
+
+以下保留原日期的研究、调用链和变更记录；其中旧目录注册、Preview 包装和已退役 Skill 不代表当前安装方式。
 
 ```text
 用户任务 / 已确认 brief / 当前权限

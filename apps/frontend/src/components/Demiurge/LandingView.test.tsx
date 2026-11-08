@@ -1798,7 +1798,7 @@ describe('LandingView bootstrap submission', () => {
     errorLog.mockRestore();
   });
 
-  it('shows a rejected idea below the prompt and keeps the draft editable', async () => {
+  it('reports a rejected idea through the global notification and keeps the draft editable', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     runIdeaIntake.mockRejectedValueOnce(new Error('这里用于创建游戏。请描述你想制作的游戏。'));
 
@@ -1806,10 +1806,33 @@ describe('LandingView bootstrap submission', () => {
     await submitIdeaAndConfirmIntake('你是谁');
 
     const message = await screen.findByText('这里用于创建游戏。请描述你想制作的游戏。');
-    expect(screen.getByRole('alert')).toContainElement(message);
+    expect(message.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByTestId('idea-avatar')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveValue('你是谁');
     expect(screen.getByRole('textbox')).toBeEnabled();
+    errorLog.mockRestore();
+  });
+
+  it.each([false, true])('shows one global error for provider rejection and restores the idea (desktop=%s)', async desktop => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const message = 'The selected model provider request failed (HTTP 429; code=inference_failed)';
+    runIdeaIntake.mockRejectedValueOnce(Object.assign(new Error(message), { status: 429 }));
+    if (desktop) {
+      await act(async () => {
+        render(<ToastProvider><DesktopLayout lang="zh" workspace={false}>
+          <LandingView lang="zh" onSetLang={vi.fn()} onStart={vi.fn()} />
+        </DesktopLayout></ToastProvider>);
+      });
+    } else await renderLanding();
+    await submitIdeaAndConfirmIntake('接苹果');
+    const notification = await screen.findByText(message);
+    expect(notification.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('接苹果');
+    expect(screen.getByRole('textbox')).toBeEnabled();
+    expect(runIdeaIntake).toHaveBeenCalledTimes(1);
     errorLog.mockRestore();
   });
 

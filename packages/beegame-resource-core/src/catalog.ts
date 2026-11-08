@@ -36,11 +36,12 @@ export function browseResourceCatalogPacks(
 ): ResourceCatalogPage<ResourceCatalogPack> {
   const catalogRequest = resolveCatalogRequest(request, 'packs')
   elements = elements.map(resolveEffectiveResourceMetadata)
+  const byId = new Map(elements.map(element => [element.id, element]))
   const published = packs.filter(pack => pack.status === 'published')
   const readyByPack = new Map<string, ResourceElement[]>()
   for (const element of elements) {
     const pack = published.find(candidate => candidate.id === element.packId)
-    if (!pack || !isCatalogBrowsableElement(pack, element, elements)) continue
+    if (!pack || !isCatalogBrowsableElement(pack, element, elements, byId)) continue
     const list = readyByPack.get(element.packId) ?? []
     list.push(element)
     readyByPack.set(element.packId, list)
@@ -79,12 +80,13 @@ export function browseResourcePackElements(
 ): ResourceCatalogPage<ResourceCatalogElement> {
   const catalogRequest = resolveCatalogRequest(request, `pack-elements:${packId}`)
   elements = elements.map(resolveEffectiveResourceMetadata)
+  const byId = new Map(elements.map(element => [element.id, element]))
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
   const available = elements
     .filter(element => {
       const pack = packById.get(element.packId)
-      return Boolean(pack && element.packId === packId && isCatalogBrowsableElement(pack, element, elements))
+      return Boolean(pack && element.packId === packId && isCatalogBrowsableElement(pack, element, elements, byId))
     })
   const eligible = available
     .filter(element => elementMatches(element, packById.get(element.packId)!, catalogRequest.filters))
@@ -110,6 +112,7 @@ export function matchResourceRequirements(
   elements: readonly ResourceElement[],
   request: ResourceRequirementMatchRequest,
 ): ResourceRequirementMatchResult {
+  const byId = new Map(elements.map(element => [element.id, element]))
   const publishedById = new Map(packs.filter(pack => pack.status === 'published').map(pack => [pack.id, pack] as const))
   const deliveryByFormat = new Map(
     request.deliveryCapabilities.map(capability => [
@@ -145,7 +148,7 @@ export function matchResourceRequirements(
           recordDiagnostic('missing_semantics')
           continue
         }
-        const readiness = evaluateResourceElementSelectionReadiness(pack, element, elements)
+        const readiness = evaluateResourceElementSelectionReadiness(pack, element, elements, byId)
         if (!readiness.selectionReady) {
           const code = readiness.blocking.some(issue => issue.code === 'dependency_missing' || issue.code === 'dependency_not_ready')
             ? 'dependency_not_ready'
@@ -516,11 +519,12 @@ function isCatalogBrowsableElement(
   pack: ResourcePack,
   element: ResourceElement,
   elements: readonly ResourceElement[],
+  byId: ReadonlyMap<string, ResourceElement>,
 ): boolean {
   if (element.usageTagsMode === 'manual-only') return false
   // Browsing a known file does not certify its game role. Missing semantic
   // tags must not hide otherwise ready audio/images; matching remains strict.
-  return evaluateResourceElementSelectionReadiness(pack, element, elements)
+  return evaluateResourceElementSelectionReadiness(pack, element, elements, byId)
     .blocking.every(issue => issue.code === 'usage_tags_missing')
 }
 

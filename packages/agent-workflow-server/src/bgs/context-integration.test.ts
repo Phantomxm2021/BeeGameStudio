@@ -1,10 +1,13 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createBgsRunner, bgsApplicationContext } from './runner'
 import { agentGoalPrompt, agentProfessionalContextForRun } from '../beegame/workflow-v3/agent-goal'
 import { PROJECT_GUIDE_TEMPLATE, projectGuideContext, readProjectGuide } from '../beegame/workflow-v3/project-guide'
 import { createRun } from '../beegame/workflow-v3/state'
+import { productionAssignmentBaseInstructions } from '../beegame/workflow-v3/production-workflow'
 
 // Native history appends only changed keys. An unchanged first chunk is not
 // resent when the tail changes, so concatenating since the last first chunk
@@ -72,8 +75,9 @@ test('current count excludes stale tails and legacy fragments after delta update
 // Real CLI, synthetic local Responses server; no model or project artifacts.
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 localTest('native resume receives current BGS context as well as project instructions and confirmed goal', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-context-'), game = join(root, 'game'), catalog = join(root, 'skills')
-  await mkdir(game); await mkdir(catalog)
+  const root = await mkdtemp('/private/tmp/bgs-context-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
+  await mkdir(game); await mkdir(catalog,{recursive:true})
   await mkdir(join(catalog, 'fixture'))
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: synthetic\ndescription: Offline fixture.\n---\nFixture.')
   const inputs: any[][] = []
@@ -104,7 +108,7 @@ localTest('native resume receives current BGS context as well as project instruc
     settings: { engine: 'Godot', platform: 'Mobile', dimension: '2D', inputs: ['Touch'] },
     requirements: Array.from({ length: 90 }, (_, i) => ({ id: i, text: '保留用户明确要求的设计流程、交互体验与可编辑内容，具体安排由执行者自行决定。' })) })
   expect(Buffer.byteLength(longBrief)).toBeGreaterThan(12_000)
-  let nativeSessionId = '', runtime: Awaited<ReturnType<typeof runner.start>> | undefined
+  let nativeSessionId = '', runtimeSha256 = '', runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
     for (const [index, marker] of ['INITIAL_GUIDE_MARKER', 'UPDATED_GUIDE_MARKER', 'SHORT_GUIDE_MARKER', 'FOCUSED_GUIDE_MARKER'].entries()) {
       const guide = PROJECT_GUIDE_TEMPLATE + '\n# Project instructions\n' + marker + '\n'
@@ -122,14 +126,18 @@ localTest('native resume receives current BGS context as well as project instruc
         }),
       ].join('\n')
       if (index !== 2) expect(Buffer.byteLength(systemContext)).toBeGreaterThan(5500)
+      const baseInstructions=index<3 ? productionAssignmentBaseInstructions({...run,
+        creation:{initialDelivery:'complete-game',editableContent:false,verification:'isolated'}},
+        {stage:index===2?'verification':'implementation',originRequestKey:run.requestKey}) : undefined
       runtime = await runner.start({
         sessionId: 'context-fixture', cwd: game,
         ...([1, 2].includes(index) ? { resumeSessionId: nativeSessionId } : {}),
-        systemContext,
+        systemContext,baseInstructions,
         confirmedBriefContext: run.requirements.text,
-        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
         onNativeSessionId: id => { nativeSessionId = id },
+        onNativeContext: context => { runtimeSha256 = context.runtimeSha256 },
         requestPermission: async () => ({ behavior: 'deny' }),
       })
       await runtime.submit({
@@ -137,14 +145,34 @@ localTest('native resume receives current BGS context as well as project instruc
         confirmedBriefContext: run.requirements.text, signal: AbortSignal.timeout(15_000),
         onMessage() {}, requestPermission: async () => ({ behavior: 'deny' }),
       })
+      // Check the actual outgoing model request, not just the app-server RPC.
+      if(baseInstructions) {
+        // Native history keeps old developer fragments. The current-context
+        // slot must carry exactly the current role on first use and cold resume.
+        const current=latestContext(inputs.at(-1)!,'bgsRuntime')
+        expect(current.split(baseInstructions)).toHaveLength(2)
+        expect(current).not.toContain(index===2?'You are the implementation author':'You are the independent runtime verifier')
+        expect(JSON.stringify(inputs.at(-1))).toContain('You are a coding agent running in the BGS CLI')
+      } else {
+        const effectiveInput=JSON.stringify(inputs.at(-1))
+        expect(effectiveInput).not.toContain('You are the implementation author for one assignment')
+        expect(effectiveInput).not.toContain('You are the independent runtime verifier')
+      }
       const sent = JSON.stringify(inputs.at(-1))
+      expect(sent).toContain('synthetic')
       expect(sent).not.toContain('tokens truncated')
       // Exercise native AGENTS loading rather than duplicating the template
       // inside the host context: the complete current contract must arrive.
       expect(inputs.at(-1)!.some(item => item.role === 'user' &&
         (item.content ?? []).some((block: any) => block.text?.includes(guide)))).toBe(true)
       expect(systemContext).not.toContain(PROJECT_GUIDE_TEMPLATE)
-      expect(latestContext(inputs.at(-1)!, 'bgsRuntime')).toBe(systemContext)
+      const currentRuntime = latestContext(inputs.at(-1)!, 'bgsRuntime')
+      // The frame includes access and completion authority too; check the exact
+      // producer fingerprint as well as the caller's complete context body.
+      expect(createHash('sha256').update(currentRuntime).digest('hex')).toBe(runtimeSha256)
+      expect(currentRuntime.split(systemContext)).toHaveLength(2)
+      expect(currentRuntime).toContain('No preparation JSON result is required for this task.')
+      expect(currentRuntime).not.toContain('Final JSON schema:')
       expect(latestContext(inputs.at(-1)!, 'bgsConfirmedBrief')).toBe(run.requirements.text)
       expect(sent.split(index === 2 ? 'SHORT_CURRENT_BRIEF' : 'CURRENT_BRIEF_' + marker)).toHaveLength(2)
       expect(sent.split('CURRENT_TOOLS_DIRECTORY_' + marker)).toHaveLength(2)
@@ -168,8 +196,9 @@ localTest('native resume receives current BGS context as well as project instruc
       runtime = await runner.start({
         sessionId: 'context-fixture', cwd: game, resumeSessionId: nativeSessionId,
         systemContext, confirmedBriefContext: run.requirements.text,
-        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
+        onNativeContext: context => { runtimeSha256 = context.runtimeSha256 },
         requestPermission: async () => ({ behavior: 'deny' }),
       })
       await runtime.submit({
@@ -178,7 +207,12 @@ localTest('native resume receives current BGS context as well as project instruc
         requestPermission: async () => ({ behavior: 'deny' }),
       })
       const sent = inputs.at(-1)!
-      expect(latestContext(sent, 'bgsRuntime')).toBe(systemContext)
+      const currentRuntime = latestContext(sent, 'bgsRuntime')
+      expect(createHash('sha256').update(currentRuntime).digest('hex')).toBe(runtimeSha256)
+      if (systemContext) expect(currentRuntime.split(systemContext)).toHaveLength(2)
+      else expect(currentRuntime).not.toContain(marker)
+      expect(currentRuntime).toContain('No preparation JSON result is required for this task.')
+      expect(currentRuntime).not.toContain('Final JSON schema:')
       expect(latestContext(sent, 'bgsConfirmedBrief')).toBe(run.requirements.text)
       await runtime.dispose?.()
       runtime = undefined

@@ -18,7 +18,7 @@ test('missing optional clients do not block project tools or grant fallback host
       preparePreviewRecorder: () => { throw Error('Recorder must not run without Playwright'); },
     }));
     mock.module(new URL('shared-sharp.ts', base).pathname, () => ({ sharedSharp: missing }));
-    mock.module(new URL('content-checker-runtime.ts', base).pathname, () => ({ sharedContentChecker: missing, sharedProjectReads: missing, MEDIA_PRODUCTION_ENTRY: "", RESOURCE_PRODUCTION_ENTRY: "" }));
+    mock.module(new URL('content-checker-runtime.ts', base).pathname, () => ({ sharedContentChecker: missing, MEDIA_PRODUCTION_ENTRY: "", RESOURCE_PRODUCTION_ENTRY: "" }));
     const { projectExecutionAccess } = await import(new URL('project-execution-access.ts', base).href);
     const { openAgentTools } = await import(new URL('workflow-v3/agent-tools.ts', base).href);
     const { produceMedia } = await import(new URL('media-production.ts', base).href);
@@ -30,21 +30,21 @@ test('missing optional clients do not block project tools or grant fallback host
       access = await projectExecutionAccess({workspacePath:root,sessionId:'fixture',environment:{
         BEEGAME_SHARP_MODULE:'file:///stale-sharp.mjs',BEEGAME_PLAYWRIGHT_MODULE:'file:///stale-browser.mjs',
       }});
-      assert.deepEqual(access.unavailable.sort(), ['image processing (Sharp)','project read tools','resource/media tools'].sort());
-      assert.equal(optionalCalls, 3);
+      assert.deepEqual(access.unavailable.sort(), ['image processing (Sharp)','resource/media tools'].sort());
+      assert.equal(optionalCalls, 2);
       assert.equal(playwrightCalls, 0);
-      assert.equal(access.projectReadToolPath, undefined);
+      assert.equal('projectReadToolPath' in access, false);
       for (const key of ['BEEGAME_SHARP_MODULE','BEEGAME_CONTENT_CHECKER_MODULE'])
         assert.equal(access.environment[key], '');
       assert.equal(access.environment.BEEGAME_FONT_MODULE, undefined);
       assert.equal(access.environment.BEEGAME_PLAYWRIGHT_MODULE, undefined);
       assert.equal(access.environment.PLAYWRIGHT_BROWSERS_PATH, undefined);
       readonly=await projectExecutionAccess({workspacePath:root,sessionId:'readonly',environment:{},readOnly:true});
-      assert.equal(optionalCalls,3);
+      assert.equal(optionalCalls,2);
       assert.deepEqual(readonly.unavailable,[]);
       assert.equal(readonly.config.permissions['bgs-project'].filesystem[root],'read');
       assert.equal(readonly.config.permissions['bgs-project'].filesystem[':root'],'deny');
-      assert.equal(readonly.projectReadToolPath,undefined);
+      assert.equal('projectReadToolPath' in readonly,false);
       assert.equal(readonly.environment.BEEGAME_FONT_MODULE,undefined);
       const permissions = access.config.permissions['bgs-project'].filesystem;
       assert.equal(permissions['/synthetic-playwright'], undefined);
@@ -105,3 +105,34 @@ test('missing optional clients do not block project tools or grant fallback host
   ])
   expect(code, out + err).toBe(0)
 }, 30000)
+
+
+test('native document scope supports continuous authoring while reviewer scope stays read-only and paths remain checked',async()=>{
+  const {mkdtemp,mkdir,writeFile,symlink,rm}=await import('node:fs/promises')
+  const {tmpdir}=await import('node:os'),{join}=await import('node:path')
+  const {projectExecutionAccess}=await import('./project-execution-access')
+  const {nativeSessionOutputPath}=await import('./native-runtime-process-path')
+  const root=await mkdtemp(join(tmpdir(),'bgs-native-doc-alias-')),game=join(root,'game')
+  await mkdir(join(game,'docs'),{recursive:true});await writeFile(join(root,'outside.md'),'UNCHANGED')
+  await symlink(join(root,'outside.md'),join(game,'docs/GDD.md'))
+  try {
+    await expect(projectExecutionAccess({workspacePath:game,sessionId:'alias',environment:{},readOnly:true,documentPath:'docs/GDD.md'})).rejects.toThrow('Document file must not resolve through a link')
+    await expect(projectExecutionAccess({workspacePath:game,sessionId:'alias',environment:{},readOnly:true,documentPath:'../outside.md'})).rejects.toThrow('docs/ path')
+    expect(await Bun.file(join(root,'outside.md')).text()).toBe('UNCHANGED')
+    await rm(join(game,'docs/GDD.md'))
+    const access=await projectExecutionAccess({workspacePath:game,sessionId:'author',environment:{},documentPath:'docs/GDD.md'})
+    try {
+      const author=access.config.permissions['bgs-project'].filesystem
+      const review=access.config.permissions['bgs-project-review'].filesystem
+      expect(author[access.root]).toBe('write')
+      expect(author[join(access.root,'docs/GDD.md')]).toBe('write')
+      expect(author[join(access.root,'AGENTS.md')]).toBe('read')
+      expect(author[join(access.root,'assets/asset-manifest.json')]).toBe('read')
+      expect(review[access.root]).toBe('read')
+      expect(review[join(access.root,'docs/GDD.md')]).toBeUndefined()
+      expect(review[join(access.root,'docs')]).toBeUndefined()
+      expect(access.config.permissions['bgs-project-review'].network.enabled).toBe(false)
+    } finally {await access.close();await rm(nativeSessionOutputPath(game,'author'),{recursive:true,force:true})}
+    await expect(projectExecutionAccess({workspacePath:game,sessionId:'alias',environment:{},documentPath:'../outside.md'})).rejects.toThrow('docs/ path')
+  }finally{await rm(nativeSessionOutputPath(game,'alias'),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+})

@@ -1,0 +1,189 @@
+[
+  {
+    "repo": "qiuaoru-coder/game-design-agent-skills",
+    "status": 200,
+    "branch": "main",
+    "sha": "29e8c759ca26c6bd4f337744b647dc728bf322b6",
+    "pushedAt": "2026-08-25T20:07:04Z",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "archived": false,
+    "files": [
+      {
+        "path": "LICENSE",
+        "status": 200,
+        "bytes": 1070,
+        "url": "https://raw.githubusercontent.com/qiuaoru-coder/game-design-agent-skills/29e8c759ca26c6bd4f337744b647dc728bf322b6/LICENSE"
+      },
+      {
+        "path": "README.md",
+        "status": 200,
+        "bytes": 6178,
+        "url": "https://raw.githubusercontent.com/qiuaoru-coder/game-design-agent-skills/29e8c759ca26c6bd4f337744b647dc728bf322b6/README.md"
+      },
+      {
+        "path": "game-design-reality-check/SKILL.md",
+        "status": 200,
+        "bytes": 7821,
+        "url": "https://raw.githubusercontent.com/qiuaoru-coder/game-design-agent-skills/29e8c759ca26c6bd4f337744b647dc728bf322b6/game-design-reality-check/SKILL.md"
+      },
+      {
+        "path": "game-gmt-review/SKILL.md",
+        "status": 200,
+        "bytes": 4579,
+        "url": "https://raw.githubusercontent.com/qiuaoru-coder/game-design-agent-skills/29e8c759ca26c6bd4f337744b647dc728bf322b6/game-gmt-review/SKILL.md"
+      }
+    ]
+  },
+  {
+    "repo": "bindaksu/gamedev-skills",
+    "status": 200,
+    "branch": "master",
+    "sha": "1fc844644ce26a40f0269a8bd3efe326e554bb7c",
+    "pushedAt": "2026-10-08T16:02:39Z",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "archived": false,
+    "files": [
+      {
+        "path": "LICENSE",
+        "status": 200,
+        "bytes": 1067,
+        "url": "https://raw.githubusercontent.com/bindaksu/gamedev-skills/1fc844644ce26a40f0269a8bd3efe326e554bb7c/LICENSE"
+      },
+      {
+        "path": "README.md",
+        "status": 200,
+        "bytes": 10397,
+        "url": "https://raw.githubusercontent.com/bindaksu/gamedev-skills/1fc844644ce26a40f0269a8bd3efe326e554bb7c/README.md"
+      },
+      {
+        "path": "skills/gamedev-audio-designer/SKILL.md",
+        "status": 200,
+        "bytes": 20828,
+        "url": "https://raw.githubusercontent.com/bindaksu/gamedev-skills/1fc844644ce26a40f0269a8bd3efe326e554bb7c/skills/gamedev-audio-designer/SKILL.md"
+      },
+      {
+        "path": "skills/gamedev-game-feel-designer/SKILL.md",
+        "status": 200,
+        "bytes": 17305,
+        "url": "https://raw.githubusercontent.com/bindaksu/gamedev-skills/1fc844644ce26a40f0269a8bd3efe326e554bb7c/skills/gamedev-game-feel-designer/SKILL.md"
+      },
+      {
+        "path": "skills/gamedev-narrative-designer/SKILL.md",
+        "status": 200,
+        "bytes": 15668,
+        "url": "https://raw.githubusercontent.com/bindaksu/gamedev-skills/1fc844644ce26a40f0269a8bd3efe326e554bb7c/skills/gamedev-narrative-designer/SKILL.md"
+      },
+      {
+        "path": "skills/gamedev-reviewer/SKILL.md",
+        "status": 200,
+        "bytes": 16297,
+        "url": "https://raw.githubusercontent.com/bindaksu/gamedev-skills/1fc844644ce26a40f0269a8bd3efe326e554bb7c/skills/gamedev-reviewer/SKILL.md"
+      }
+    ]
+  },
+  {
+    "repo": "satiricalguru/Agents-skills",
+    "status": 200,
+    "branch": "main",
+    "sha": "e049c10be3e23d37345b0c042502bb86ccafa7a1",
+    "pushedAt": "2026-10-27T17:30:11Z",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "archived": false,
+    "files": [
+      {
+        "path": "LICENSE",
+        "status": 200,
+        "bytes": 1069,
+        "url": "https://raw.githubusercontent.com/satiricalguru/Agents-skills/e049c10be3e23d37345b0c042502bb86ccafa7a1/LICENSE"
+      },
+      {
+        "path": "README.md",
+        "status": 200,
+        "bytes": 55216,
+        "url": "https://raw.githubusercontent.com/satiricalguru/Agents-skills/e049c10be3e23d37345b0c042502bb86ccafa7a1/README.md"
+      },
+      {
+        "path": "skills/build-game-camera-controls.md",
+        "status": 200,
+        "bytes": 1195,
+        "url": "https://raw.githubusercontent.com/satiricalguru/Agents-skills/e049c10be3e23d37345b0c042502bb86ccafa7a1/skills/build-game-camera-controls.md"
+      }
+    ]
+  },
+  {
+    "repo": "gamedev-skills/awesome-gamedev-agent-skills",
+    "status": 200,
+    "branch": "main",
+    "sha": "19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9",
+    "pushedAt": "2026-10-28T03:10:14Z",
+    "license": {
+      "key": "apache-2.0",
+      "name": "Apache License 2.0",
+      "spdx_id": "Apache-2.0",
+      "url": "https://api.github.com/licenses/apache-2.0",
+      "node_id": "MDc6TGljZW5zZTI="
+    },
+    "archived": false,
+    "files": [
+      {
+        "path": "LICENSE",
+        "status": 200,
+        "bytes": 11395,
+        "url": "https://raw.githubusercontent.com/gamedev-skills/awesome-gamedev-agent-skills/19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9/LICENSE"
+      },
+      {
+        "path": "README.md",
+        "status": 200,
+        "bytes": 21108,
+        "url": "https://raw.githubusercontent.com/gamedev-skills/awesome-gamedev-agent-skills/19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9/README.md"
+      },
+      {
+        "path": "skills/disciplines/audio-design/SKILL.md",
+        "status": 200,
+        "bytes": 9562,
+        "url": "https://raw.githubusercontent.com/gamedev-skills/awesome-gamedev-agent-skills/19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9/skills/disciplines/audio-design/SKILL.md"
+      }
+    ]
+  },
+  {
+    "repo": "openai/plugins",
+    "status": 200,
+    "branch": "main",
+    "sha": "0722921d5542fc593105c27bd52630babd8b8c2a",
+    "pushedAt": "2026-10-30T16:35:10Z",
+    "license": null,
+    "archived": false,
+    "files": [
+      {
+        "path": "README.md",
+        "status": 200,
+        "bytes": 1283,
+        "url": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/README.md"
+      },
+      {
+        "path": "plugins/game-studio/skills/game-playtest/SKILL.md",
+        "status": 200,
+        "bytes": 2912,
+        "url": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/game-studio/skills/game-playtest/SKILL.md"
+      }
+    ]
+  }
+]

@@ -1,7 +1,8 @@
 import { constants } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { mkdir, open, readFile, realpath, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
-import { array, discriminatedUnion, enum as enumeration, literal, number, object, string } from 'zod/v4'
+import { array, discriminatedUnion, enum as enumeration, literal, number, object, record, string } from 'zod/v4'
 import type { z } from 'zod/v4'
 import type sharp from 'sharp'
 import { atlasFrameName, parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
@@ -19,7 +20,7 @@ const imageJob = source.extend({
   padding: object({ top: zero, bottom: zero, left: zero, right: zero }).strict().optional(),
   overlays: array(source.extend({ left: zero, top: zero })).optional(),
 }).strict()
-export const atlasRequestSchema = object({ operation: literal('atlas'), group: string().min(1),
+const atlasRequestSchema = object({ operation: literal('atlas'), group: string().min(1),
     frames: array(source.extend({ id: string().min(1) })).min(1),
     output: string().min(1), metadata: string().min(1),
     maxWidth: positive, maxHeight: positive, padding: zero,
@@ -30,6 +31,12 @@ const requestSchema = discriminatedUnion('operation', [
     alphaThreshold: number().int().min(0).max(254).default(0) }).strict(),
   object({ operation: literal('images'), jobs: array(imageJob).min(1) }).strict(),
   atlasRequestSchema,
+  object({ operation: literal('atlas-frames'), input: string().min(1), output: string().min(1),
+    frames: record(string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/), object({
+      x: zero, y: zero, w: positive, h: positive,
+    }).strict()).refine(frames => Object.keys(frames).length >= 1 && Object.keys(frames).length <= 128,
+      'Atlas needs 1–128 named frames'),
+  }).strict(),
 ])
 const inside = (root: string, path: string) => {
   const part = relative(root, path)
@@ -40,7 +47,7 @@ const pixels = (width: number, height: number) => {
 }
 
 /** Mechanical production only. It never edits Manifest, design or content. */
-export async function produceMedia(workspace: string, value: unknown, suppliedSharp?: typeof sharp, reuseIdentical = false) {
+export async function produceMedia(workspace: string, value: unknown, suppliedSharp?: typeof sharp) {
   const request = requestSchema.parse(value)
   const root = await realpath(workspace)
   const image = suppliedSharp ?? (await import(process.env.BEEGAME_SHARP_MODULE ||
@@ -85,15 +92,14 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
   const save = async (entries: Array<{ path: string; bytes: Buffer | string }>) => {
     const pending = []
     for (const entry of entries) {
-      if (reuseIdentical) {
+      try {
+        const existing = await open(entry.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
         try {
-          const existing = await open(entry.path, constants.O_RDONLY | constants.O_NOFOLLOW)
-          try {
-            if (!(await existing.readFile()).equals(Buffer.from(entry.bytes))) throw Error('Existing media differs; choose a new version path: ' + relative(root, entry.path))
-          } finally { await existing.close() }
-          continue
-        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-      }
+          if (!(await existing.stat()).isFile()) throw Error('Existing media must be a regular file: ' + relative(root, entry.path))
+          if (!(await existing.readFile()).equals(Buffer.from(entry.bytes))) throw Error('Existing media differs; choose a new version path: ' + relative(root, entry.path))
+        } finally { await existing.close() }
+        continue
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
       pending.push(entry)
     }
     const opened: Array<{ path: string; handle: Awaited<ReturnType<typeof open>> }> = []
@@ -103,6 +109,11 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
       for (let i = 0; i < pending.length; i++) await opened[i]!.handle.writeFile(pending[i]!.bytes)
       for (const entry of opened) await entry.handle.close()
       completed.push(...entries.map(entry => relative(root, entry.path)))
+      const file_paths = entries.map(entry => relative(root, entry.path))
+      const local_file_hashes = Object.fromEntries(entries.map((entry, index) =>
+        [file_paths[index]!, createHash('sha256').update(entry.bytes).digest('hex')]))
+      const path = file_paths[0]!
+      return { path, root_path: path, file_paths, sha256: local_file_hashes[path]!, local_file_hashes }
     } catch (error) {
       const cleanup: string[] = []
       for (const entry of opened) {
@@ -148,6 +159,28 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
         coordinates: 'decoded-source-pixels', measurements,
         unverified: ['Object identity/count, complete object coverage, state alignment, filtering safety, appearance and runtime use. Alpha bounds are not automatically safe crop/frame rectangles; omitted objects and pixels outside a selected region are not checked.'] }
     }
+    if (request.operation === 'atlas-frames') {
+      const bytes = await readFile(await inputPath(request.input))
+      const decoded = await decode(bytes)
+      if (bytes.length < 26 || !bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+        throw Error('Atlas source must be a PNG')
+      if (decoded.width * decoded.height > 16_000_000) throw Error('Atlas source dimensions are invalid or too large')
+      const rectangles = Object.entries(request.frames)
+      const frames = Object.fromEntries(rectangles.map(([name, frame]) => [name, { frame }]))
+      const sheet = parseSpriteSheet({ frames })!
+      validateSpriteSheetBounds(sheet, decoded.width, decoded.height)
+      for (let i = 0; i < rectangles.length; i++) for (let j = 0; j < i; j++) {
+        const [name, a] = rectangles[i]!, [, b] = rectangles[j]!
+        if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h)
+          throw Error('Overlapping atlas frames: ' + name)
+      }
+      if (!request.output.startsWith('assets/runtime/')) throw Error('Atlas output must be a PNG under assets/runtime/')
+      const output = await target(request.output, '.png')
+      const metadata = await target(request.output.slice(0, -4) + '.json', '.json')
+      const files = await save([{ path: output, bytes }, { path: metadata, bytes: JSON.stringify({ frames }, null, 2) + '\n' }])
+      return { valid: true, operation: request.operation, ...files, ...decoded, frameCount: rectangles.length,
+        unverified: ['Frame identity, complete artwork, filtering safety, provenance and runtime use.'] }
+    }
     if (request.operation === 'images') {
       const outputs = []
       for (const job of request.jobs) {
@@ -176,12 +209,15 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
         if (overlays.length) current = await image(current).composite(overlays).png().toBuffer()
         meta = await decode(current)
         const path = await target(job.output, '.png')
-        await save([{ path, bytes: current }])
-        outputs.push({ path: job.output, ...meta, operations: {
+        const files = await save([{ path, bytes: current }])
+        outputs.push({ ...files, operation: request.operation, ...meta, operations: {
           input: job.input, crop: job.crop, resize: job.resize, padding: job.padding, overlays: job.overlays,
         } })
       }
-      return { valid: true, operation: request.operation, outputs, issues: [],
+      const first = outputs[0]!
+      return { valid: true, operation: request.operation, path: first.path, root_path: first.path,
+        sha256: first.sha256, file_paths: outputs.map(item => item.path),
+        local_file_hashes: Object.assign({}, ...outputs.map(item => item.local_file_hashes)), outputs, issues: [],
         unverified: ['Appearance, provenance and runtime use require existing resource registration and inspection.'] }
     }
     pixels(request.maxWidth, request.maxHeight)
@@ -215,8 +251,8 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
     const decoded = await decode(buffer)
     validateSpriteSheetBounds(sheet, decoded.width, decoded.height)
     const output = await target(request.output, '.png'), metadata = await target(request.metadata, '.json')
-    await save([{ path: output, bytes: buffer }, { path: metadata, bytes: JSON.stringify({ frames }, null, 2) + '\n' }])
-    return { valid: true, operation: request.operation, group: request.group, outputs: [request.output, request.metadata],
+    const files = await save([{ path: output, bytes: buffer }, { path: metadata, bytes: JSON.stringify({ frames }, null, 2) + '\n' }])
+    return { valid: true, operation: request.operation, ...files, group: request.group, outputs: [request.output, request.metadata],
       ...decoded, frameCount: names.size, padding: request.padding, paddingMode: 'edge-copy', filtering: request.filtering,
       issues: [], unverified: ['Grouping suitability, appearance, provenance and target-runtime rendering. Register with the existing Manifest tools.'] }
   } catch (error) {
@@ -225,18 +261,20 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
 }
 
 export const MEDIA_HELP = `Usage: bun <current-tools-directory>/media.mjs request.json
-Replace <current-tools-directory> with the current BGS tools directory supplied in the project context. Run from the project root. Inputs are project-relative. Outputs are new assets/*.png (and atlas *.json); existing files are never overwritten. Use a new version path for replacements, then update registration explicitly. Batch failures list retained successful files; rerun only unfinished jobs.
+Replace <current-tools-directory> with the current BGS tools directory supplied in the project context. Run from the project root. Inputs are project-relative. Outputs are assets/*.png (and atlas *.json); matching existing bytes can be reused, changed files are never overwritten. Use a new version path for replacements, then update registration explicitly. Batch failures list retained successful files; rerun only unfinished jobs.
 Read-only measurement example:
 {"operation":"inspect","inputs":[{"input":"assets/sheet.png"},{"input":"assets/sheet.png","crop":{"left":10,"top":20,"width":100,"height":80}}],"alphaThreshold":0}
 Decodes existing images/regions without creating or changing files. Reports alpha bounds in original decoded source pixels and visible pixels on each region edge. Threshold 0 counts every nonzero alpha, including soft shadows; another threshold changes the measurement, not quality. A bound can include multiple objects; a selected region can omit artwork. This measures existing pixels rather than selecting objects or proving filtering safety. Locate the required elements in the actual sheet before measuring their regions; report unresolved identity or bounds.
-An intact sheet can use the existing assets.mjs atlas <sheet.png> <frames.json> <assets/runtime/name.png> command with measured {frames:{name:{x,y,w,h}}}: it copies PNG bytes unchanged and writes named metadata, then resources.mjs registers the pair. No per-part files or repacking are required. These coordinates describe the generated image for import, not a layout required before static atlas generation. Confirm complete elements and suitable sampling gutters; animation sequences additionally need consistent frame origins and pose checks. Exact alpha bounds alone are not filtering padding. Use images/atlas processing below only for a demonstrated crop, canvas alignment, resize or padding need. These operations do not fix incorrect artwork or authorize paid regeneration.
+Intact PNG sheet with measured named regions (no cropping or repacking):
+{"operation":"atlas-frames","input":"assets/generated/sheet.png","frames":{"icon":{"x":0,"y":0,"w":32,"h":32}},"output":"assets/runtime/sheet.png"}
+Copies the PNG unchanged and writes same-basename JSON. Coordinates are decoded source pixels, not pre-generation layout; frames must be complete, in bounds, nonoverlapping and use 1–128 distinct letter/digit/underscore/hyphen names starting with a letter or digit. Use atlas below only when separate images actually need packing.
 Images example:
 {"operation":"images","jobs":[{"input":"assets/source.png","crop":{"left":0,"top":0,"width":32,"height":32},"resize":{"width":64,"height":64,"fit":"contain","kernel":"nearest"},"padding":{"top":2,"bottom":2,"left":2,"right":2},"output":"assets/icon.png"}]}
 Optional overlays: [{"input":"assets/mark.png","left":4,"top":4}], with optional crop. Coordinates/dimensions are decoded image pixels, not UI logical units. Resize fit is contain/cover/fill (cover crops; fill distorts); kernel is nearest/lanczos3. Transparent padding; single-frame inputs only; output PNG.
 Atlas example:
 {"operation":"atlas","group":"hud","frames":[{"id":"button","input":"assets/button.png"},{"id":"icon","input":"assets/icon.png","crop":{"left":2,"top":2,"width":64,"height":64}}],"padding":1,"filtering":"linear","maxWidth":1024,"maxHeight":1024,"output":"assets/hud.png","metadata":"assets/hud.atlas.json"}
 Fixed-order shelf packing, no rotation/trim, edge-copy padding outside frame rectangles; linear filtering requires padding. Inputs in one group must share planned filtering/loading use. No auto scaling, multi-page splitting or ID renaming.
-Reports decoded dimensions/channels, output paths, operations or frame count. Frame rectangles are in the metadata file consumed by existing sprite-sheet readers. No Manifest edits or aesthetic approval. Existing resource acquisition/audio channels remain available; this tool does not compose music.`
+Outputs include decoded dimensions and acquisition file facts (path, sha256, file_paths and local_file_hashes). Save the returned JSON and register it with resources.mjs acquisition; individual images jobs also carry their own receipts. Media processing does not determine rights/provenance; retain the original source declaration. Reports operations or frame count. Frame rectangles are in the metadata file consumed by existing sprite-sheet readers. No Manifest edits or aesthetic approval. Existing resource acquisition/audio channels remain available; this tool does not compose music.`
 
 export async function runMediaProductionCli(args = process.argv.slice(2)) {
   try {

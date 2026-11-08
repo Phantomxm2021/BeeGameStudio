@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { nativeSessionTemporaryPath, nativeSessionOutputPath } from './native-runtime-process-path'
 import { sharedSharp } from './shared-sharp'
-import { sharedContentChecker, sharedProjectReads } from './content-checker-runtime'
+import { sharedContentChecker } from './content-checker-runtime'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
 import { PROJECT_DESIGN_PATHS } from './design-handoff'
 import { projectHostDirectory, projectWorkDirectory } from './project-storage-paths'
@@ -45,13 +45,14 @@ async function hostToolReadPaths(root:string):Promise<string[]> {
   return [...new Set(result)]
 }
 
-/** Host-file boundary for a whole project, not the document-task policy.
- * Tools, delegation and public networking remain native capabilities. */
+/** Native filesystem profiles; an authorized document assignment opens docs/,
+ * while review access remains read-only. Execution stays with the native runtime. */
 export async function projectExecutionAccess(input: {
   workspacePath: string
   sessionId: string
   environment: Record<string, string>
   readOnly?: boolean
+  documentPath?: string
 }) {
   const root = await realpath(input.workspacePath)
   const toolReadPaths=await hostToolReadPaths(root)
@@ -66,10 +67,9 @@ export async function projectExecutionAccess(input: {
       return undefined
     }
   }
-  const [sharp, checker, projectReads] = await Promise.all([
+  const [sharp, checker] = await Promise.all([
     input.readOnly ? undefined : optional('image processing (Sharp)', sharedSharp),
     input.readOnly ? undefined : optional('resource/media tools', sharedContentChecker),
-    input.readOnly ? undefined : optional('project read tools', sharedProjectReads),
   ])
   const temporary = nativeSessionTemporaryPath(root, input.sessionId)
   const nativeOutput = nativeSessionOutputPath(root, input.sessionId)
@@ -111,7 +111,7 @@ export async function projectExecutionAccess(input: {
     await realpath(process.execPath), nativeOutput]
   // Bun's module resolver needs the private checker directory as well as its file.
   const runtimeReadPaths = [assetCapability,
-    ...(checker ? [checker.root] : []), ...(projectReads ? [projectReads.root] : []),
+    ...(checker ? [checker.root] : []),
     ...(sharp?.roots ?? [])]
   if (process.platform === 'darwin') {
     const developer = await realpath('/var/select/developer_dir').catch(() => undefined)
@@ -159,7 +159,19 @@ export async function projectExecutionAccess(input: {
   const reviewFilesystem = { ...filesystem, [root]: 'read', [temporary]: 'write' }
   for (const path of runtimeReadPaths) filesystem[path] = 'read'
   if (input.readOnly) filesystem[temporary] = 'write'
+  // Preserve confirmed design records outside an authorized document assignment.
   for (const path of protectedPaths) filesystem[path] = 'read'
+  if (input.documentPath) {
+    const docs=resolve(root,'docs'), document=resolve(root,input.documentPath)
+    if (!within(docs,document) || document===docs || isAbsolute(input.documentPath))
+      throw Error('Document authoring requires a project-relative docs/ path')
+    await mkdir(docs,{recursive:true})
+    if (await realpath(docs)!==docs) throw Error('Document directory must not resolve through a link')
+    try { if (await realpath(document)!==document) throw Error('Document file must not resolve through a link') }
+    catch(error) { if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error }
+    filesystem[docs]='write'
+    filesystem[document]='write'
+  }
   for (const path of ['assets/asset-manifest.json', 'assets/manifest']) filesystem[resolve(root, path)] = 'read'
   // Keep credentials/configuration and BGS control data outside model writes.
   for (const name of ['.git', '.bgs', '.agents', '.aws']) filesystem[resolve(root, name)] = 'read'
@@ -175,7 +187,6 @@ export async function projectExecutionAccess(input: {
   reviewFilesystem[runtimeTemporary] = 'write'
   return { root, temporary: runtimeTemporary, nativeOutput, environment, reviewEnvironment, toolReadPaths, protectedPaths, unavailable,
     close: () => rm(runtimeTemporary, { recursive: true, force: true }),
-    projectReadToolPath: projectReads?.path,
     config: {
       default_permissions: 'bgs-project',
       permissions: {

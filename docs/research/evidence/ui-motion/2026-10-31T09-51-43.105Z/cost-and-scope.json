@@ -1,0 +1,105 @@
+{
+  "bgsModelCalls": 0,
+  "bgsModelTokens": 0,
+  "paidImageCalls": 0,
+  "newDependencies": [],
+  "serviceRestarts": 0,
+  "skillCount": 21,
+  "newSkillCount": 0,
+  "browserAttempts": [
+    {
+      "directory": "2026-10-31T09-48-07.977Z",
+      "status": "failed",
+      "durationMs": 7449
+    },
+    {
+      "directory": "2026-10-31T09-49-26.949Z",
+      "status": "passed",
+      "durationMs": 24436
+    },
+    {
+      "directory": "2026-10-31T09-51-43.105Z",
+      "status": "passed",
+      "durationMs": 24356
+    }
+  ],
+  "sumBrowserDurationMs": 56241,
+  "retainedEvidenceBytesAtMeasurement": 49245031,
+  "fileChanges": [
+    {
+      "file": ".beegame/skills/bgs-game-skills/game-ui-ux-designer/SKILL.md",
+      "beforeBytes": 6753,
+      "afterBytes": 6976,
+      "beforeSha256": "914141c83bd7c08f202d0549d8c06ef3784f000803f487ac8029f5441a3c3d9e",
+      "afterSha256": "0eb69b237ee4e62aed30e5169fdd5fc72a2ab51f89f1cbe5a9f96300f9c1bece",
+      "finalBytes": 6976,
+      "finalSha256": "0eb69b237ee4e62aed30e5169fdd5fc72a2ab51f89f1cbe5a9f96300f9c1bece"
+    },
+    {
+      "file": ".beegame/skills/bgs-game-skills/game-ui-ux-designer/references/motion-language.md",
+      "beforeBytes": 6957,
+      "afterBytes": 7286,
+      "beforeSha256": "2522d4b7d4ceb0faa4d33915d381d16e0b3cf3604e125d36e2879c7557974a07",
+      "afterSha256": "c3670f8e2fbf37535c0839887c914934ccfc6c2b2d1d8fb75979110f9476b5d4",
+      "finalBytes": 7286,
+      "finalSha256": "c3670f8e2fbf37535c0839887c914934ccfc6c2b2d1d8fb75979110f9476b5d4"
+    },
+    {
+      "file": ".beegame/skills/bgs-game-skills/game-playtest-performance/references/experience-validation.md",
+      "beforeBytes": 3568,
+      "afterBytes": 3740,
+      "beforeSha256": "bcbc3ff0b8a4de8877e8800de16d474503c39f0e74c21379cbf61aee670e2aff",
+      "afterSha256": "48ee711d8a4c5818c66fc56245be017c45cb55158d00eb8a665bb707e34bdb4b",
+      "finalBytes": 3740,
+      "finalSha256": "48ee711d8a4c5818c66fc56245be017c45cb55158d00eb8a665bb707e34bdb4b"
+    },
+    {
+      "file": ".beegame/skills/bgs-game-skills/game-ui-ux-designer/references/player-task-studies.md",
+      "beforeBytes": 0,
+      "afterBytes": 3316,
+      "finalBytes": 3316,
+      "finalSha256": "f9b2e0e60ae5ceeb4a9373d21610eafad32982321ce30230a8996041580f49f4"
+    },
+    {
+      "file": "docs/research/ui-motion-research-notes.md",
+      "beforeBytes": 0,
+      "afterBytes": 12197,
+      "finalBytes": 12197,
+      "finalSha256": "70eca5d5141679676e3f6b756af9359b8fd4e75355a0f1a3800119f99b3e6ba4"
+    },
+    {
+      "file": "packages/agent-workflow-server/src/beegame/fixtures/ui-motion.ts",
+      "beforeBytes": 0,
+      "afterBytes": 9526,
+      "finalBytes": 9966,
+      "finalSha256": "8afa3387448c2091ce81843b20d2d3fc3fd74128a538ac60e5c3d2ddd15e3542"
+    },
+    {
+      "file": "packages/agent-workflow-server/src/beegame/ui-motion.browser.test.ts",
+      "beforeBytes": 0,
+      "afterBytes": 13223,
+      "finalBytes": 15912,
+      "finalSha256": "69978ae30771392f0d399a2cc65f87dad37b192cc8a596cd0f1a7704a9fe313d"
+    }
+  ],
+  "limits": [
+    "Codex research/authoring tokens not available in BGS counters",
+    "No end-to-end production-model cost or taste comparison",
+    "Bytes are not API tokens",
+    "Screencast and screenshots affect timing; callback cadence is not display FPS",
+    "Existing build is a baseline, not application of revised Skills; pause was unverified in the headless environment"
+  ],
+  "existingBuildReadonlyAttempts": [
+    {
+      "directory": "apple-readonly-2026-10-31T10-00-47.160Z",
+      "status": "failed",
+      "durationMs": 22527
+    },
+    {
+      "directory": "apple-readonly-2026-10-31T10-02-55.552Z",
+      "status": "observed",
+      "durationMs": 8634
+    }
+  ],
+  "existingBuildRetainedBytes": 43365031
+}

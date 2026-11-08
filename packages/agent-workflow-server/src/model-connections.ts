@@ -25,6 +25,7 @@ import {
   getOpenCodeGoProvider,
   validateOpenCodeGoConfig,
 } from '@bee-game-studio/agent-workflow/opencode-go'
+import { z } from 'zod'
 import { BgsClient } from './bgs/client'
 import { assertBgsAccountIdle } from './bgs/account-activity'
 import { bgsHome } from './bgs/auth'
@@ -340,11 +341,48 @@ const AUTH_ENV = [
   'GROK_BASE_URL',
 ]
 
+// An explicitly selected account-level native connection is BYOK. Resolve it
+// before UI credentials so the bridge, intake and native threads share one source.
+function configuredModelConnection(root: string): Record<string, string> | undefined {
+  const path = join(bgsHome(root), 'config.toml')
+  if (!existsSync(path)) return
+  const input = Bun.TOML.parse(readFileSync(path, 'utf8'))
+  const provider: unknown = Reflect.get(input, 'model_provider')
+  if (provider === undefined || provider === 'openai') return
+  const parsed = z.object({
+    model: z.string().trim().min(1),
+    model_provider: z.string().min(1),
+    model_providers: z.record(z.string(), z.unknown()),
+  }).safeParse(input)
+  if (!parsed.success) throw Error('BGS config.toml needs top-level model, model_provider and model_providers')
+  const selected = z.object({
+    base_url: z.string().url(),
+    env_key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+    wire_api: z.literal('responses').default('responses'),
+    requires_openai_auth: z.literal(false).optional(),
+  }).safeParse(parsed.data.model_providers[parsed.data.model_provider])
+  if (!selected.success) throw Error('BGS config.toml selected provider needs a Responses base_url and an env_key variable name')
+  const apiKey = process.env[selected.data.env_key]
+  if (!apiKey) throw Error('BGS config.toml credential environment variable is not set; env_key must name an exported variable, not contain the key')
+  return {
+    ...Object.fromEntries(AUTH_ENV.map(key => [key, ''])),
+    OPENAI_API_KEY: apiKey,
+    OPENAI_BASE_URL: selected.data.base_url,
+    BEEGAME_MODEL: parsed.data.model,
+    BEEGAME_MODEL_TYPE: 'openai',
+    BEEGAME_API_PROTOCOL: 'responses',
+    BGS_MODEL_CONNECTION_RESOLVED: '1',
+    [BEEGAME_MODEL_BILLING_SOURCE]: 'byok',
+  }
+}
+
 export function resolveModelConnection(
   root: string,
   config: PublicModelConfig,
   platformEnv: Record<string, string>,
 ): Record<string, string> {
+  const configured = configuredModelConnection(root)
+  if (configured) return configured
   const method = read(root).connections[config.id]?.method ?? 'platform'
   if (
     config.published === false ||

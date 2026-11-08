@@ -1,4 +1,4 @@
-import { resolveApprovedOutboundTarget, type OutboundTargetPolicyOptions } from '@bee-game-studio/security-core'
+import { inspectOutboundTarget, resolveApprovedOutboundTarget, type OutboundTargetPolicyOptions } from '@bee-game-studio/security-core'
 import {
   createPublicOutboundDns,
   resolvePublicIpv4,
@@ -25,4 +25,12 @@ export function resolveMcpOutboundTarget(
   resolver: typeof resolveApprovedOutboundTarget = resolveApprovedOutboundTarget,
 ) {
   return resolver(value, createMcpOutboundPolicy(options))
+}
+
+export function inspectMcpOutboundTarget(
+  value: string,
+  options?: OutboundTargetPolicyOptions,
+  inspector: typeof inspectOutboundTarget = inspectOutboundTarget,
+) {
+  return inspector(value, createMcpOutboundPolicy(options))
 }

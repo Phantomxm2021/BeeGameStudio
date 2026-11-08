@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from '../bgs/fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -11,7 +12,8 @@ const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 // the upstream Responses service and billing backend are synthetic/local.
 nativeTest.each(['reset', 'eof', 'cancel', 'complete-open'] as const)(
   'Responses accounting survives %s without treating normal completed-stream cancellation as unknown usage', async mode => {
-  const root = await mkdtemp('/private/tmp/bgs-responses-receipts-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-responses-receipts-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game)
   await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
@@ -63,6 +65,7 @@ nativeTest.each(['reset', 'eof', 'cancel', 'complete-open'] as const)(
     if (url.origin !== server.url.origin) throw Error('External fixture request forbidden')
     return { url, addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
   } })
+  await writeFixturePlugin(catalog)
   const manager = new BeeGameSessionManager(runner, root, () => ({ BEEGAME_CONFIG_DIR: join(root, 'private'),
     BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog, BEEGAME_API_PROTOCOL: 'responses', OPENAI_API_KEY: 'fixture-only',
     OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model', BEEGAME_MODEL_BILLING_SOURCE: 'platform' }), billing)

@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>platformer observation fixture</title>
+<style>body{font:16px system-ui;background:#14202c;color:#f4eee1;margin:12px}canvas{background:#20374a;display:block;border:2px solid #aab9b6}h1{font-size:24px;margin:8px 0}button{font:inherit;padding:8px;margin:4px;border-radius:8px}p{max-width:680px;margin:8px 0}</style>
+<h1>platformer — synthetic gameplay fixture</h1><p>Arrow keys move; Space jumps. Cross the gap and reach the flag. Falling loses; restart tries again.</p><div id="controls"></div>
+<canvas width="640" height="360" aria-label="Game field"></canvas><p role="status" id="status"></p>
+<script>
+const ctx=document.querySelector('canvas').getContext('2d'),status=document.querySelector('#status'),keys={};let state='Ready',text='';
+function log(event,value){console.log('game-event',JSON.stringify({event,value,state,at:performance.now()}));}
+function button(name,action){const b=document.createElement('button');b.textContent=name;b.onclick=action;document.querySelector('#controls').append(b);return b;}
+addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Space'].includes(e.code)){e.preventDefault();keys[e.code]=true;log('key-down',e.code);}});
+addEventListener('keyup',e=>{keys[e.code]=false;log('key-up',e.code);});
+button('Start',()=>{state='Playing';reset();log('start');});button('Restart',()=>{for(const key in keys)delete keys[key];reset();state='Playing';log('restart');});
+
+let x=50,y=290,vy=0,grounded=true;
+function reset(){x=50;y=290;vy=0;grounded=true;}
+function step(dt){
+ const oldY=y;x+=((keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0))*200*dt;
+ if(keys.Space&&grounded){vy=-480;grounded=false;log('jump');}vy+=1000*dt;y+=vy*dt;
+ const floor=x<240||x>380;if(floor&&oldY<=290&&y>=290&&vy>0){y=290;vy=0;grounded=true;}
+ if(!floor)grounded=false;if(y>380){state='Lost';log('fall');}if(x>580&&y<=290){state='Won';log('goal');}
+ ctx.fillStyle='#546d83';ctx.fillRect(0,320,240,40);ctx.fillRect(380,320,260,40);
+ ctx.fillStyle='#e3b43b';ctx.fillRect(590,220,6,100);ctx.fillRect(596,220,30,20);
+ ctx.fillStyle='#b94859';ctx.fillRect(x-12,y,24,30);text=grounded?'Grounded':'Airborne';
+}
+let last=performance.now();function frame(now){const dt=Math.min((now-last)/1000,.04);last=now;if(state==='Playing'){ctx.clearRect(0,0,640,360);step(dt);}status.textContent=state+' — '+text;requestAnimationFrame(frame);}requestAnimationFrame(frame);
+</script></html>

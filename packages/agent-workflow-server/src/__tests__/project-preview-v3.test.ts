@@ -72,7 +72,7 @@ test('ordinary V3 Preview opens an existing build with no native session, valid 
     expect(await (await f.request('/api/projects/fixture/deployment-readiness')).json()).toMatchObject({allowed:false,code:'deployment-build-unavailable'})
     const exported=await f.request('/api/projects/fixture/workflow-v3/export','POST',{
       measurementId:crypto.randomUUID(),requirementsRevision:f.run.requirements.revision,kind:'project'})
-    expect(exported.status).toBe(409);expect((await exported.json()).code).toBe('preview-unverified')
+    expect(exported.status).toBe(410);expect((await exported.json()).code).toBe('measurement-retired')
     const restarted=await f.request('/api/projects/fixture/preview/restart','POST',{})
     expect(restarted.status).toBe(200)
     const reopenedUrl=(await restarted.json()).url
@@ -207,3 +207,28 @@ test('accepted resume stays busy while its native session is being rebuilt', asy
     expect((await (await f.request('/api/projects/fixture/runtime-state')).json()).phase).toBe('idle')
   } finally { release(); spy?.mockRestore(); catalogSpy?.mockRestore(); await f.close() }
 }, 15000)
+
+
+test('retired online measurement endpoints check ownership and permissions without loading Runs or executing work', async () => {
+  let reads = 0
+  const f = await fixture({workflowV3Store: {
+    async read() { reads++; throw Error('Retired endpoint must not load history') },
+    async commit() { throw Error('Retired endpoint must not write') },
+  }})
+  try {
+    reads = 0
+    for (const [method, suffix] of [
+      ['GET', '/agent/measurements/saved-id'], ['POST', '/export'],
+      ['GET', '/preview'], ['POST', '/preview'], ['DELETE', '/preview'],
+    ]) {
+      const path = '/api/projects/fixture/workflow-v3' + suffix
+      const response = await f.request(path, method, method === 'GET' ? undefined : {})
+      expect(response.status, await response.clone().text()).toBe(410)
+      expect(await response.json()).toMatchObject({code:'measurement-retired'})
+      expect((await f.request(path, method, undefined, 'other')).status).toBe(404)
+      if (suffix === '/preview' && method !== 'GET') expect((await f.request(path, method, {}, 'viewer')).status).toBe(403)
+    }
+    expect(reads).toBe(0)
+    expect(f.counts()).toEqual({models:0,commits:0,processes:0})
+  } finally { await f.close() }
+})

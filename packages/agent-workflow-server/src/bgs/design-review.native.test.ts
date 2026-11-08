@@ -1,16 +1,18 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { createBgsRunner } from './runner'
-import { assertDesignReviewReady, type DesignReviewReceipt } from '../beegame/workflow-v3/design-review'
+import { assertDesignReviewReady, designAuthorOutputSchema, type DesignReviewReceipt } from '../beegame/workflow-v3/design-review'
 import { getLatestRuntimeUsage, type BeeGameEvent } from '../beegame/session-manager'
 
 const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
-for (const outcome of ['repaired', 'exhausted', 'missing-resolution', 'resumed', 'resume-during-review', 'resume-after-pass'] as const)
+for (const outcome of ['repaired', 'exhausted', 'missing-resolution', 'resumed', 'resume-during-review', 'resume-after-pass', 'provider-rejection', 'prefixed-author', 'three-findings', 'three-findings-missing-resolution', 'three-findings-resumed'] as const)
 for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
   protocol + ' native GDD review snapshot, isolation and repair: ' + outcome, async () => {
-    const root = await mkdtemp('/private/tmp/bgs-independent-review-'), game = join(root, 'game'), skills = join(root, 'skills')
+    const root = await mkdtemp('/private/tmp/bgs-independent-review-'), game = join(root, 'game'), skills = join(root, 'plugin-source', 'bgs-game-skills')
+    await mkdir(skills,{recursive:true})
     await mkdir(join(game, 'docs'), { recursive: true })
     await writeFile(join(game, 'AGENTS.md'), 'PROJECT_WORK_GUIDE_MUST_NOT_REACH_REVIEWER\n')
     await mkdir(join(skills, 'fixture'), { recursive: true })
@@ -20,14 +22,39 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
     await writeFile(join(game, 'docs/GDD.md'), candidate)
     const finalDraft = revised + 'The dependent rule is consistent too.\n'
     const requests: any[] = [], events: any[] = [], receipts: DesignReviewReceipt[] = [], accepted: unknown[] = [], usage: BeeGameEvent[] = []
+    const finalFormat=(index:number)=>{
+      const request=requests[index]
+      const format=protocol==='responses'?request.text?.format:request.response_format
+      const messages=protocol==='responses'?request.input:request.messages
+      const input=messages.filter((item:any)=>['developer','system','user'].includes(item.role)).map((item:any)=>typeof item.content==='string'?item.content:item.content.map((part:any)=>part.text??'').join('')).join('\n')
+      if(format) {
+        expect(format.type).toBe('json_schema')
+        expect(input).not.toContain('Final JSON schema:')
+        const schema=protocol==='responses'?format.schema:format.json_schema.schema
+        expect(schema.required).toContain('findings')
+        return {schema}
+      }
+      expect(request.text?.format).toBeUndefined()
+      expect(request.response_format).toBeUndefined()
+      // Native context frames can split a long schema across numbered values.
+      const parts=new Map([...input.matchAll(/<bgsRuntime_part_(\d{6})>([\s\S]*?)<\/bgsRuntime_part_\d{6}>/g)]
+        .map(match=>[match[1]!,match[2]!] as const))
+      const runtime=[...parts].sort(([a],[b])=>a.localeCompare(b)).map(([,value])=>value).join('')
+      const marker='Final JSON schema:\n',context=runtime.includes(marker)?runtime:input,offset=context.lastIndexOf(marker)
+      expect(offset).toBeGreaterThanOrEqual(0)
+      expect(input).not.toContain('For ordinary task completion')
+      return {schema:JSON.parse(context.slice(offset+marker.length).split('\n')[0])}
+    }
     const confirmedBriefContext = JSON.stringify({ settings: { platform: 'VR/AR', engine: 'Unity' }, idea: 'Synthetic original requirement' })
     const authorSecret = 'AUTHOR_REASONING_MUST_NOT_REACH_REVIEWER'
     const targetContext = 'BGS target interpretation: the selected Unity runtime. Current GDD handoff: MVP implementation.'
     const finding = { location: 'GDD sample rule', issue: 'Synthetic contradictory result',
       evidence: 'The same condition has two declared outcomes.', impact: 'Implementation would have to invent a decision.' }
+    const threeFindings = outcome.startsWith('three-findings')
     const disposition = { finding: 1, status: 'corrected' as const, evidence: 'Saved GDD now specifies one result for the sample condition.' }
+    const dispositions = [1,2,3].map(finding => ({...disposition,finding}))
     const report = (initial: boolean, newDefect = false) => JSON.stringify({ summary: initial ? 'Resolve the sample rule' : 'Rule checked; runtime quality remains unverified',
-      findings: initial ? [finding] : newDefect ? [{ ...finding, issue: 'New dependent defect' }] : [], ...(initial || outcome === 'missing-resolution' ? {} : { resolutions: [disposition] }) })
+      findings: initial ? (threeFindings ? [finding,{...finding,issue:'Second source conflict'},{...finding,issue:'Third source conflict'}] : [finding]) : newDefect ? [{ ...finding, issue: 'New dependent defect' }] : [], ...(initial || outcome === 'missing-resolution' || outcome === 'three-findings-missing-resolution' ? {} : { resolutions: threeFindings ? dispositions : [disposition] }) })
     const probe = `const fs=require('node:fs'); const fd=fs.openSync('docs/GDD.md','r'); const part=Buffer.alloc(64); const count=fs.readSync(fd,part,0,64,0); fs.closeSync(fd); console.log(part.subarray(0,count).toString('utf8')); for(const file of ['docs/GDD.md','forbidden.txt']) { let denied=false; try {fs.writeFileSync(file,'Forbidden')} catch {denied=true} if(!denied) throw Error('Reviewer could write '+file) } console.log('review read-only verified'); for(const key of ['PLAYWRIGHT_BROWSERS_PATH', 'BEEGAME_PLAYWRIGHT_MODULE', 'BEEGAME_PREVIEW_TEST_MODULE', 'BEEGAME_PREVIEW_CAPABILITY_FILE', 'BEEGAME_MEASUREMENT_CAPABILITY_FILE', 'BEEGAME_ASSET_CAPABILITY_FILE', 'BEEGAME_CONTENT_CHECKER_MODULE', 'BEEGAME_SHARP_MODULE', 'BEEGAME_FONT_MODULE', 'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR']) { if(Object.hasOwn(process.env,key)) throw Error('Reviewer inherited '+key) } console.log('review environment and calculation verified: '+String(6n*7n))`
     const command = process.execPath + ' -e ' + "'" + probe.replaceAll("'", "'\\''") + "'"
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
@@ -35,15 +62,16 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
       if (new URL(request.url).pathname !== '/v1/' + (protocol === 'responses' ? 'responses' : 'chat/completions')) return new Response('Unexpected route', { status: 404 })
       const body = await request.json() as any
       const step = requests.push(body) - 1
+      if(outcome==='provider-rejection')return Response.json({error:{type:'invalid_request_error',code:'unsupported_value',param:'model',message:'The selected fixture model is unavailable'}},{status:400})
       if(outcome==='resume-during-review' && step===5) {stop.abort();return new Response(null,{status:499})}
       if (step > (outcome==='resume-after-pass'?9:8)) return new Response('Unexpected extra model request', { status: 400 })
       const exhausted = outcome === 'exhausted' && step === 2
-      const tool = step === 1 || step === 3 || step === 6
+      const tool = threeFindings ? step === 1 || step === 3 || step === 4 : step === 1 || step === 3 || step === 6
       const call = step === 1
         ? { id: 'fc_read', call_id: 'review-read', name: 'exec_command', arguments: JSON.stringify({ cmd: command, max_output_tokens: 200 }), status: 'completed' }
-        : { id: 'fc_write-' + step, call_id: 'author-revise-' + step, name: 'WriteProjectFile', arguments: JSON.stringify({ file_path: 'docs/GDD.md', content: step === 6 ? finalDraft : revised }), status: 'completed' }
-      const text = step === 2 ? report(true) : step === 5 ? report(false, true) : step === 8 ? report(false)
-        : JSON.stringify({ status: 'ready', summary: step === 0 ? authorSecret : 'Resolved the sample-rule contradiction in GDD.',
+        : { id: 'fc_write-' + step, call_id: 'author-revise-' + step, name: 'exec_command', arguments: JSON.stringify({ cmd: process.execPath + ' -e ' + "'" + ('require("node:fs").writeFileSync("docs/GDD.md",' + JSON.stringify(step === 6 ? finalDraft : revised) + ')').replaceAll("'", "'\\''") + "'" }), status: 'completed' }
+      const text = threeFindings ? (step === 2 ? report(true) : step === 6 ? report(false) : JSON.stringify({status:'ready',summary:step===0 ? authorSecret : 'Verified all three findings and saved the revised GDD.'})) : step === 2 ? report(true) : step === 5 ? report(false, true) : step === 8 ? report(false)
+        : (outcome==='prefixed-author'?'设计记录已完成。\n\n':'')+JSON.stringify({ status: 'ready', summary: step === 0 ? authorSecret : 'Resolved the sample-rule contradiction in GDD.',
           ...(step === 0 || step === 9 ? {} : { reviewResponses: [disposition] }) })
       if (protocol === 'chat-completions') return new Response([
         { choices: [{ index: 0, delta: exhausted ? {} : tool ? { tool_calls: [{ index: 0, id: call.call_id, type: 'function', function: { name: call.name, arguments: call.arguments } }] } : { content: text }, finish_reason: null }] },
@@ -70,13 +98,13 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
     let runtime: Awaited<ReturnType<typeof runner.start>> | undefined, authorThread = ''
     const source = async () => ({ path: 'docs/GDD.md', sha256: createHash('sha256').update(await readFile(join(game, 'docs/GDD.md'))).digest('hex') })
     const finalOutput = { readOnly: true, writeDocument: { path: 'docs/GDD.md', authorize: async () => {} },
-      schema: { type: 'object' }, designReview: {
+      schema: designAuthorOutputSchema(), designReview: {
         context: targetContext,
         candidate: async (value: unknown) => {
           const result = value as { summary: string; reviewResponses?: typeof disposition[] }
           return { source: await source(), summary: result.summary, reviewResponses: result.reviewResponses }
         },
-        record: async (receipt: DesignReviewReceipt) => { receipts.push(receipt); if(outcome==='resumed' && receipts.length===1 || outcome==='resume-after-pass' && receipts.length===3) stop.abort() },
+        record: async (receipt: DesignReviewReceipt) => { receipts.push(receipt); if((outcome==='resumed'||outcome==='three-findings-resumed') && receipts.length===1 || outcome==='resume-after-pass' && receipts.length===3) stop.abort() },
       },
       accept: async (value: unknown) => { assertDesignReviewReady(await source(), receipts); accepted.push(value); return 'Reviewed candidate handed off' },
     }
@@ -84,7 +112,7 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
     const requestPermission = async (request: any) => ({ behavior: request.toolName === 'Write' ? 'allow' as const : 'deny' as const })
     try {
       const startInput: Parameters<typeof runner.start>[0] = { sessionId: 'independent-review-fixture', cwd: game, language: 'zh', systemContext: targetContext + '\n' + authorSecret, confirmedBriefContext, finalOutput,
-        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: skills, OPENAI_API_KEY: 'fixture-only', BEEGAME_API_PROTOCOL: protocol,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(skills), OPENAI_API_KEY: 'fixture-only', BEEGAME_API_PROTOCOL: protocol,
           OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-review-model' },
         requestPermission, onNativeSessionId: id => { authorThread = id },
         onNativeUsage: (value, epoch, details) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
@@ -95,8 +123,56 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
       let failure: unknown
       try {
         await runtime.submit({ prompt: authorSecret + ': save the candidate', confirmedBriefContext, finalOutput,
-          signal: outcome==='resumed'||outcome==='resume-during-review'||outcome==='resume-after-pass'?stop.signal:AbortSignal.timeout(25_000), onMessage: message => { events.push(message) }, requestPermission })
+          signal: outcome==='resumed'||outcome==='three-findings-resumed'||outcome==='resume-during-review'||outcome==='resume-after-pass'?stop.signal:AbortSignal.timeout(25_000), onMessage: message => { events.push(message) }, requestPermission })
       } catch (error) { failure = error }
+      if (threeFindings) {
+        if (outcome === 'three-findings-resumed') {
+          expect(failure).toBeInstanceOf(Error)
+          expect(receipts).toHaveLength(1)
+          expect(requests).toHaveLength(3)
+          const originalAuthor=authorThread
+          await runtime.dispose?.()
+          const resumedOutput={...finalOutput,designReview:{...finalOutput.designReview,previousReviews:[...receipts]}}
+          runtime=await runner.start({...startInput,resumeSessionId:originalAuthor,nativeRecovery:true,finalOutput:resumedOutput})
+          expect(authorThread).toBe(originalAuthor)
+          failure=undefined
+          try {await runtime.submit({prompt:'',confirmedBriefContext,finalOutput:resumedOutput,nativeRecovery:true,
+            signal:AbortSignal.timeout(25000),onMessage:message=>{events.push(message)},requestPermission})}
+          catch(error){failure=error}
+        }
+        expect(requests).toHaveLength(7)
+        const format=finalFormat
+        for (const index of [0,3,4,5]) expect(format(index)).toMatchObject({schema:designAuthorOutputSchema()})
+        const finalAuthor = protocol === 'responses' ? requests[6].input : requests[6].messages
+        expect(JSON.stringify(finalAuthor)).toContain('Author revision summary:')
+        expect(JSON.stringify(finalAuthor)).toContain('Verified all three findings')
+        for (const issue of ['Synthetic contradictory result','Second source conflict','Third source conflict'])
+          expect(JSON.stringify(finalAuthor)).toContain(issue)
+        expect(format(6).schema.properties.resolutions).toMatchObject({minItems:3,maxItems:3,
+          items:{properties:{finding:{minimum:1,maximum:3}}}})
+        expect(await readFile(join(game,'docs/GDD.md'),'utf8')).toBe(revised)
+        if (outcome === 'three-findings-missing-resolution') {
+          expect(String(failure)).toContain('exactly one evidence-backed disposition')
+          expect(accepted).toHaveLength(0)
+          expect(receipts).toHaveLength(1)
+        } else {
+          expect(failure).toBeUndefined()
+          expect(accepted).toHaveLength(1)
+          expect(receipts).toHaveLength(2)
+          expect(receipts[1]!.authorResponses).toEqual([])
+          expect(receipts[1]!.report.resolutions).toEqual(dispositions)
+        }
+        return
+      }
+      if(outcome==='provider-rejection'||outcome==='prefixed-author') {
+        expect(failure).toBeInstanceOf(Error)
+        expect(String(failure)).toContain(outcome==='provider-rejection'?'unsupported_value':'final result is missing or invalid')
+        expect(requests).toHaveLength(1)
+        expect(finalFormat(0)).toMatchObject({schema:designAuthorOutputSchema()})
+        expect(receipts).toHaveLength(0)
+        expect(accepted).toHaveLength(0)
+        return
+      }
       if(outcome==='resumed'||outcome==='resume-during-review'||outcome==='resume-after-pass') {
         expect(failure).toBeInstanceOf(Error)
         expect(receipts).toHaveLength(outcome==='resume-after-pass'?3:1)
@@ -112,14 +188,21 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
         catch(error){failure=error}
         if(outcome!=='resume-after-pass')expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('Current GDD revision findings')
         expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('Synthetic contradictory result')
-        expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('reviewResponses')
+        const restoredRequest=requests[outcome==='resumed'?3:6]
+        expect(finalFormat(outcome==='resumed'?3:6)).toMatchObject({schema:designAuthorOutputSchema()})
         expect(events.filter(event=>event.eventType==='tool.started'&&event.text==='Independent GDD review').map(event=>event.reviewRound)).toEqual(outcome==='resume-during-review'?[1,2,2]:[1,2,3])
       }
       expect(JSON.stringify(requests[0])).not.toContain('preview-test-client.mjs')
-      const outputFormat = (index: number) => protocol === 'responses' ? requests[index].text.format : requests[index].response_format.json_schema
-      expect(outputFormat(1)).toMatchObject({ strict: true, schema: { required: ['summary', 'findings'], additionalProperties: false } })
+      const outputFormat = finalFormat
+      expect(outputFormat(0)).toMatchObject({schema:designAuthorOutputSchema()})
+      expect(JSON.stringify(requests[0])).not.toContain('For ordinary task completion')
+      expect(outputFormat(1)).toMatchObject({ schema: { required: ['summary', 'findings'], additionalProperties: false } })
       expect(outputFormat(1).schema.properties).not.toHaveProperty('resolutions')
       expect(outputFormat(2)).toEqual(outputFormat(1))
+      if(outcome!=='exhausted') {
+        expect(outputFormat(3)).toMatchObject({schema:designAuthorOutputSchema()})
+        expect(outputFormat(4)).toEqual(outputFormat(3))
+      }
       const reviewerInput = JSON.stringify(requests[1])
       const toolNames=requests[1].tools.flatMap((tool:any)=>tool.type==='namespace' ? tool.tools.map((child:any)=>child.name) : [tool.name??tool.function?.name])
       expect(toolNames).not.toContain('view_image')
@@ -147,10 +230,10 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
         expect(getLatestRuntimeUsage(usage).total_tokens).toBe(32340)
         return
       }
-      expect(outputFormat(5)).toMatchObject({ strict: true, schema: { required: ['summary', 'findings', 'resolutions'],
+      expect(outputFormat(5)).toMatchObject({ schema: { required: ['summary', 'findings', 'resolutions'],
         properties: { resolutions: { minItems: 1, maxItems: 1, items: { properties: { finding: { minimum: 1, maximum: 1 } } } } } } })
       if (outcome === 'missing-resolution') {
-        // Providers may ignore strict output: local validation still rejects, never guesses or retries.
+        // A malformed final report still fails local validation, never guesses or retries.
         expect(failure).toBeInstanceOf(Error)
         expect((failure as Error).message).toContain('exactly one evidence-backed disposition')
         expect(requests).toHaveLength(6)
@@ -225,7 +308,7 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
       }
       expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('Synthetic contradictory result')
       expect(JSON.stringify(requests[3]).includes('Return only the required status and summary')).toBe(false)
-      expect(JSON.stringify(requests[3])).toContain('Return the fields in the current final-result contract')
+      expect(finalFormat(3).schema).toEqual(designAuthorOutputSchema())
       expect(JSON.stringify(requests[5])).toContain('Targeted follow-up only')
       if(outcome==='resume-during-review')expect(JSON.stringify(requests[6]).includes('New dependent defect')).toBe(false)
       else expect(JSON.stringify(requests[6])).toContain('New dependent defect')

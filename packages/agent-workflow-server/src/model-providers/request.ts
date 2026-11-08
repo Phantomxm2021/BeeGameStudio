@@ -1,7 +1,7 @@
 import type { ProviderConfig } from './config'
 import { nativeRequest, openCodeGoHeaders } from './requests'
 import { responseEvents, nativeResponses, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
-import { UnknownProviderToolError, type Json } from './messages'
+import { UnknownProviderToolError, normalizeNativeFunctionHistory, type Json } from './messages'
 import { safeErrorFacts } from '../security/safe-error-facts'
 import { providerHttpError } from './http-error'
 
@@ -15,6 +15,7 @@ export async function requestProvider(
   onToolError?: ProviderToolErrorHandler,
   outputBudget?: (fallback: unknown) => Promise<number | undefined>,
 ): Promise<Response> {
+  body = normalizeNativeFunctionHistory(body)
   if (config.protocol === 'responses')
     return nativeResponses(await request(config.baseUrl + '/responses', {
       method: 'POST',

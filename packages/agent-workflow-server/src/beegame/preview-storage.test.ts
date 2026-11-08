@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createPreviewStorageStore } from './preview-storage-store'
 import { createGameStorage, handlePreviewStorageRequest, PREVIEW_STORAGE_PATH, PREVIEW_STORAGE_HEADER, PREVIEW_STORAGE_VERSION } from './preview-storage.mjs'
-import { createMeasuredPreview } from './workflow-v3/measured-preview'
+import { createStaticPreview } from './workflow-v3/static-preview'
 import { createRun } from './workflow-v3/state'
 import { createPreviewCapabilityManager } from '../auth/preview-capability'
 import { previewTestHostDocument } from '@bee-game-studio/agent-workflow/preview-environment'
@@ -60,7 +60,7 @@ test('save HTTP contract rejects scope spoofing, non-opaque foreign origins, mal
   expect((await handlePreviewStorageRequest(new Request(url,{method:'OPTIONS',headers:{origin:'null'}}),store)).status).toBe(204)
   const failure=await handlePreviewStorageRequest(new Request(url,{method:'POST',headers:{'content-type':'application/json'},body:'{"key":"best","value":"11"}'}),
     {...store,setItem(){throw Error('private database location')}})
-  expect(failure.status).toBe(503);expect(await failure.text()).not.toContain('private database')
+  expect(failure.status).toBe(503);expect(await failure.clone().text()).not.toContain('private database')
   const client=await createGameStorage('https://cap.preview.test/index.html',async(_input,init)=>init?.method==='HEAD'
     ?new Response(null,{headers:{[PREVIEW_STORAGE_HEADER]:PREVIEW_STORAGE_VERSION}}):failure.clone())
   await expect(client.setItem('best','11')).rejects.toThrow('HTTP 503')
@@ -74,7 +74,7 @@ const gameHtml='<!doctype html><output id="best">Loading</output><button id="sav
 
 test('opaque Preview preserves saves across new browsers, Chat sessions and server stores, without host or deployment storage access',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-save-browser-'))),workspace=join(root,'project')
-  let storage:ReturnType<typeof createPreviewStorageStore>|undefined,preview:ReturnType<typeof createMeasuredPreview>|undefined,browser:any,viewUrl=''
+  let storage:ReturnType<typeof createPreviewStorageStore>|undefined,preview:ReturnType<typeof createStaticPreview>|undefined,browser:any,viewUrl=''
   const runs=new Map<string,ReturnType<typeof createRun>>()
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     const url=new URL(request.url)
@@ -88,7 +88,7 @@ test('opaque Preview preserves saves across new browsers, Chat sessions and serv
   const origin='http://localhost:'+server.port
   const recreate=()=>{
     preview?.dispose();storage?.close();storage=createPreviewStorageStore(join(root,'host-data'))
-    preview=createMeasuredPreview({origin,capabilities:createPreviewCapabilityManager(),storage,
+    preview=createStaticPreview({origin,capabilities:createPreviewCapabilityManager(),storage,
       readRun:async(project,user)=>runs.get(JSON.stringify([user,project])),isBusy:()=>false})
   }
   try {

@@ -1,6 +1,7 @@
 import { safeErrorFacts } from '../security/safe-error-facts'
 import { providerConfig } from '../model-providers/config'
 import { requestProvider } from '../model-providers/request'
+import { providerHttpError, ProviderHttpError } from '../model-providers/http-error'
 import { modelRuntimeFetch } from './model-runtime-transport'
 import {
   getTLSFetchOptions,
@@ -142,10 +143,7 @@ async function generate(message: ModelRuntimeWorkerRequest) {
         AbortSignal.timeout(120_000),
         reported => { usage = reported },
       )
-      if (!response.ok) {
-        failureCode = 'upstream-http-error'; httpStatus = response.status
-        throw Error(`Model request failed (${response.status})`)
-      }
+      if (!response.ok) throw await providerHttpError(response, AbortSignal.timeout(2000))
       usage ??= unknownUsage
       result = (await response.json()) as Record<string, any>
     }
@@ -168,7 +166,9 @@ async function generate(message: ModelRuntimeWorkerRequest) {
       )
       if (calls.length !== 1) {
         failureCode = 'structured-output-missing'
-        throw Error('Structured model response must contain exactly one required function call')
+        throw Error('Structured model response must contain exactly one required function call; ' +
+          'matching=' + calls.length + ', functions=' + result.output.filter((item: any) => item.type === 'function_call').length +
+          ', messages=' + result.output.filter((item: any) => item.type === 'message').length + ', items=' + result.output.length)
       }
       content = JSON.stringify(JSON.parse(calls[0].arguments))
     } else
@@ -184,6 +184,7 @@ async function generate(message: ModelRuntimeWorkerRequest) {
     send({ type: 'model.result', requestId: message.requestId, content, ...(usage ? { usage } : {}) })
   } catch (error) {
     const facts = safeErrorFacts(error)
+    if (error instanceof ProviderHttpError) { failureCode = 'upstream-http-error'; httpStatus = error.status }
     if (error instanceof SyntaxError) failureCode = 'invalid-json'
     else if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) failureCode = 'request-timeout'
     else if (facts.networkCode) failureCode = 'network-error'
@@ -199,6 +200,7 @@ async function generate(message: ModelRuntimeWorkerRequest) {
             : 'Model request failed',
       stage, failureCode,
       ...(httpStatus ? { httpStatus } : {}),
+      ...(error instanceof ProviderHttpError ? { providerDiagnostics: error.diagnostics } : {}),
       ...(facts.networkCode ? { networkCode: facts.networkCode } : {}),
     })
   } finally {

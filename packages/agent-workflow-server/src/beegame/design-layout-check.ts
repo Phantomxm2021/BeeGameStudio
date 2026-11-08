@@ -4,7 +4,7 @@ import { inspectUiLayout, isUiControl, rectanglesIntersect } from '../../../scen
 import { parseBeeGameContentDocument } from './game-content-schema'
 import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, type LayoutConstraints, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
 import { designSupportingFiles } from './design-handoff'
-import { PROJECT_DOCUMENTS } from './project-content-authority'
+import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { collectContentSourceFiles } from './content-source-files'
 import { sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { sceneLayoutDraftIssues, contentDraftStructureIssues } from './game-content-package'

@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect, spyOn } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -139,9 +139,14 @@ test.each([{platform:'Web',engine:'React'},{platform:'Web',engine:'Phaser'},{pla
     expect(snapshot.editing).toBeUndefined()
     const state=await (await app.request('/api/projects/p/runtime-state')).json()
     expect(state.scene_ui_editor_available).toBe(false)
-    const response=await app.request('/api/projects/p/game-content/document',{method:'PUT',...json({...await editValue(f),requestKey:'forbidden-save'})})
-    expect(response.status).toBe(409)
-    expect((await response.json()).code).toBe('editor-unavailable')
+    const payload={...await editValue(f),requestKey:'forbidden-save'}
+    const reads=spyOn(f.store,'read').mockImplementation(async()=>{throw Error('Retired writes must not load workflow state')})
+    try {
+      const response=await app.request('/api/projects/p/game-content/document',{method:'PUT',...json(payload)})
+      expect(response.status).toBe(409)
+      expect((await response.json()).code).toBe('editor-unavailable')
+      expect(reads).not.toHaveBeenCalled()
+    } finally { reads.mockRestore() }
     expect(await readFile(join(f.root,'content/ui/menu.json'))).toEqual(before)
     const current=await f.current()
     expect(current.writer).toBeUndefined()

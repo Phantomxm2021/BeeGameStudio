@@ -106,3 +106,29 @@ test.each([false, true])('formal project bootstrap starts the same V3 native goa
     await rm(root, { recursive: true, force: true })
   }
 })
+
+
+test('explicit local desktop workflow storage works with Supabase login and no service-role key', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-desktop-store-'))
+  const keys = ['BEEGAME_WORKFLOW_V3_STORE', 'BEEGAME_SUPABASE_URL', 'BEEGAME_SUPABASE_ANON_KEY',
+    'BEEGAME_SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+  const previous = keys.map(key => process.env[key])
+  const cleanups: Array<() => void | Promise<void>> = []
+  try {
+    process.env.BEEGAME_WORKFLOW_V3_STORE = 'local-single-process'
+    process.env.BEEGAME_SUPABASE_URL = 'https://supabase.example.test'
+    process.env.BEEGAME_SUPABASE_ANON_KEY = 'fixture-public'
+    delete process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    const app = createAgentWorkflowApp({ currentUser: { id: 'owner', role: 'owner' },
+      dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: join(root, 'projects'),
+      modelConfigStore: false, skillsConfig: false, registerCleanup: cleanup => cleanups.push(cleanup) })
+    const response = await app.request('/api/admin/runtime-status')
+    expect(response.status).toBe(200)
+    expect((await response.json()).workflowV3).toEqual({ writers: 0, state: 'idle', scope: 'configured-store' })
+  } finally {
+    for (const cleanup of cleanups.reverse()) await cleanup()
+    keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i] })
+    await rm(root, { recursive: true, force: true })
+  }
+})

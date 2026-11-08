@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { resolveApprovedOutboundTarget } from '@bee-game-studio/security-core'
-import { createMcpOutboundPolicy, resolveMcpOutboundTarget } from '../mcp-outbound-policy'
+import { createMcpOutboundPolicy, inspectMcpOutboundTarget, resolveMcpOutboundTarget } from '../mcp-outbound-policy'
 
 const publicDns = { resolve4: () => ['93.184.216.34'], resolve6: () => [] }
 
@@ -42,4 +42,20 @@ test('private or mixed DNS never invokes the Fake-IP fallback and IPv6 is still 
   }
   const policy = createMcpOutboundPolicy({ resolve4: () => ['198.18.0.15'], resolve6: () => ['::1'] }, async () => ['93.184.216.34'])
   expect(await resolveApprovedOutboundTarget('https://mcp.example', policy)).toBeNull()
+})
+
+test('MCP inspection retains shared refusal codes without applying a provider domain allowlist', async () => {
+  const options = { ...publicDns, allowedHosts: ['model.example'] }
+  expect((await inspectMcpOutboundTarget('https://new-mcp.example', options)).approved).toBe(true)
+  for (const [url, code] of [
+    ['bad URL', 'invalid_url'], ['http://public.example', 'unsupported_protocol'],
+    ['https://u:p@public.example', 'embedded_credentials'], ['https://public.example:8888', 'port_not_allowed'],
+    ['https://127.0.0.1', 'address_not_public'], ['https://169.254.169.254', 'address_not_public'],
+  ]) expect(await inspectMcpOutboundTarget(url!, options)).toMatchObject({ approved: false, code })
+  expect(await inspectMcpOutboundTarget('https://unresolved.example', {
+    resolve4: () => { throw Error('DNS lookup failed') }, resolve6: () => [],
+  })).toEqual({ approved: false, code: 'dns_unresolved', hostname: 'unresolved.example' })
+  expect(await inspectMcpOutboundTarget('https://mixed.example', {
+    resolve4: () => ['93.184.216.34', '10.0.0.1'], resolve6: () => [],
+  })).toMatchObject({ approved: false, code: 'address_not_public' })
 })

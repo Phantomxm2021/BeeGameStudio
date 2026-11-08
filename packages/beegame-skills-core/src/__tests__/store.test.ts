@@ -1,11 +1,10 @@
-import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { mkdir, mkdtemp, lstat, realpath, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, test, afterEach } from 'bun:test'
 import { zipSync, strToU8 } from 'fflate'
 import {
-  clearRuntimeBuiltinSkills,
   getBuiltinSkillsDirectory,
   importUserSkill,
   listUserSkills,
@@ -26,6 +25,8 @@ afterEach(async () => {
 describe('BeeGame skills store', () => {
   test('loads the packaged BeeGameStudio built-in Skill catalog', async () => {
     const directory = getBuiltinSkillsDirectory()
+    expect(directory).toBe(resolve(import.meta.dir, '../../../../.beegame/plugins/bgs-game-development'))
+    expect(existsSync(resolve(directory, '../../skills/bgs-game-skills'))).toBe(false)
     const names = readdirSync(directory, { withFileTypes: true })
       .filter(entry => entry.isDirectory() && existsSync(join(directory, entry.name, 'SKILL.md')))
       .map(entry => entry.name).sort()
@@ -44,13 +45,20 @@ describe('BeeGame skills store', () => {
       'game-systems-designer-expert',
       'game-technical-artist',
       'game-ui-ux-designer',
-      'gameplay-programmer',
-      'git-workflow',
       'phaser4-gamedev',
       'spatial-computing-game-expert',
       'spatial-computing-ux-designer-expert',
       'threejs-gamedev',
     ])
+    const manifest = JSON.parse(await readFile(join(directory, '.codex-plugin/plugin.json'), 'utf8'))
+    expect(manifest.name).toBe('bgs-game-development')
+    expect(manifest.skills).toEqual(names.map(name => './' + name))
+    const marketplace = JSON.parse(await readFile(join(directory, '.agents/plugins/marketplace.json'), 'utf8'))
+    expect(marketplace.plugins).toEqual([{name:'bgs-game-development',source:{source:'local',path:'./'},
+      policy:{installation:'INSTALLED_BY_DEFAULT',authentication:'ON_USE'},category:'Developer Tools'}])
+    expect(existsSync(join(directory, 'gameplay-programmer'))).toBe(false)
+    expect(existsSync(join(directory, 'references/runtime-dependencies.md'))).toBe(true)
+    expect(existsSync(join(directory, 'phaser4-gamedev/references/react-host-integration.md'))).toBe(true)
   })
 
   test('imports zip skill packages and materializes enabled skills', async () => {
@@ -86,11 +94,11 @@ describe('BeeGame skills store', () => {
 
     materializeUserSkills([skill], { dataDir })
     await expect(readFile(
-      join(dataDir, '.runtime', 'app', 'skills', 'user-movement-contracts', 'SKILL.md'),
+      join(dataDir, '.runtime', 'app', 'bgs', 'skills', 'user-movement-contracts', 'SKILL.md'),
       'utf8',
     )).resolves.toContain('# Movement')
     await expect(readFile(
-      join(dataDir, '.runtime', 'app', 'skills', 'user-movement-contracts', 'references', 'xr.md'),
+      join(dataDir, '.runtime', 'app', 'bgs', 'skills', 'user-movement-contracts', 'references', 'xr.md'),
       'utf8',
     )).resolves.toContain('XR movement')
   })
@@ -221,12 +229,12 @@ describe('BeeGame skills store', () => {
 
   test('removes stale materialized user skill folders', async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-clean-'))
-    const staleDir = join(dataDir, '.runtime', 'app', 'skills', 'user-stale-skill')
+    const staleDir = join(dataDir, '.runtime', 'app', 'bgs', 'skills', 'user-stale-skill')
     await mkdir(staleDir, { recursive: true })
     await writeFile(join(staleDir, 'SKILL.md'), 'stale', 'utf8')
     materializeUserSkills([], { dataDir })
     await expect(readFile(
-      join(dataDir, '.runtime', 'app', 'skills', 'user-stale-skill', 'SKILL.md'),
+      join(dataDir, '.runtime', 'app', 'bgs', 'skills', 'user-stale-skill', 'SKILL.md'),
       'utf8',
     )).rejects.toThrow()
   })
@@ -259,6 +267,7 @@ describe('BeeGame skills store', () => {
       dataDir,
       '.runtime',
       'app',
+      'bgs',
       'skills',
       'user-nested-references',
       'references',
@@ -267,45 +276,26 @@ describe('BeeGame skills store', () => {
     ), 'utf8')).resolves.toContain('# Touch contract')
   })
 
-  test('clears BeeGame built-ins without removing user-selected skills', async () => {
-    dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-clear-builtins-'))
-    const runtimeSkillsDir = join(dataDir, '.runtime', 'app', 'skills')
-    const projectedSkillDir = join(runtimeSkillsDir, 'acceptance')
-    await mkdir(projectedSkillDir, { recursive: true })
-    await writeFile(join(projectedSkillDir, 'SKILL.md'), 'projected skill', 'utf8')
-    await writeFile(join(projectedSkillDir, '.beegame-builtin'), '', 'utf8')
-    await writeFile(
-      join(runtimeSkillsDir, '.beegame-builtins.json'),
-      JSON.stringify({ version: 1, skills: ['acceptance'] }),
-      'utf8',
-    )
-    const userSkillDir = join(
-      dataDir,
-      '.runtime',
-      'app',
-      'skills',
-      'user-custom',
-    )
-    await mkdir(userSkillDir, { recursive: true })
-    await writeFile(join(userSkillDir, 'SKILL.md'), 'user skill', 'utf8')
-    clearRuntimeBuiltinSkills({ dataDir })
-
-    expect(existsSync(join(
-      dataDir,
-      '.runtime',
-      'app',
-      'skills',
-      'acceptance',
-    ))).toBe(false)
-    expect(existsSync(join(
-      dataDir,
-      '.runtime',
-      'app',
-      'skills',
-      '.beegame-builtins.json',
-    ))).toBe(false)
-    await expect(readFile(join(userSkillDir, 'SKILL.md'), 'utf8'))
-      .resolves.toBe('user skill')
+  test('materializes uploads directly in native home while preserving system and unmanaged Skills', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'beegame-native-skills-'))
+    const native = join(dataDir, '.runtime', 'app', 'bgs', 'skills')
+    for (const name of ['.system/imagegen', 'personal-method']) {
+      await mkdir(join(native, name), {recursive:true})
+      await writeFile(join(native, name, 'SKILL.md'), name)
+    }
+    const skill = importUserSkill('owner', {files:[{path:'SKILL.md',content:'---\nname: uploaded-method\ndescription: Synthetic upload.\n---\nMethod.'}]}, {dataDir})
+    const legacy = join(dataDir, '.runtime', 'app', 'skills', 'user-uploaded-method')
+    await mkdir(legacy,{recursive:true});await writeFile(join(legacy,'SKILL.md'),'Former copy')
+    materializeUserSkills([skill], {dataDir})
+    expect(await readFile(join(legacy,'SKILL.md'),'utf8')).toContain('Method.')
+    expect(await realpath(legacy)).toBe(await realpath(join(native,'user-uploaded-method')))
+    expect(await readFile(join(native, 'user-uploaded-method', 'SKILL.md'), 'utf8')).toContain('Method.')
+    expect((await lstat(legacy)).isSymbolicLink()).toBe(true)
+    materializeUserSkills([], {dataDir})
+    expect(existsSync(join(native, 'user-uploaded-method'))).toBe(false)
+    expect(existsSync(legacy)).toBe(false)
+    expect(await readFile(join(native, '.system/imagegen/SKILL.md'), 'utf8')).toBe('.system/imagegen')
+    expect(await readFile(join(native, 'personal-method/SKILL.md'), 'utf8')).toBe('personal-method')
   })
 })
 
@@ -353,4 +343,29 @@ print('metadata boundaries verified')`
     expect(rejected.stderr.toString()).toContain('paths must differ')
     expect(await Bun.file(file).text()).toBe(original)
   }
+})
+
+
+test('unchanged materialized Skills retain file identity; changed and removed files still synchronize',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-stable-skills-'))
+  const files=[{path:'SKILL.md',content:'---\nname: stable\ndescription: Fixture.\n---\n# Stable'},
+    {path:'references/keep.md',content:'Keep'},{path:'references/remove.md',content:'Remove'}]
+  try{
+    const skill=importUserSkill('owner',{files},{dataDir:root})
+    materializeUserSkills([skill],{dataDir:root})
+    const folder=join(root,'.runtime/app/bgs/skills/user-stable'),file=join(folder,'SKILL.md')
+    const identity=(path:string)=>{const {ino,mtimeNs,ctimeNs}=statSync(path,{bigint:true});return{ino,mtimeNs,ctimeNs}}
+    const keep=join(folder,'references/keep.md'),before=identity(file),keepBefore=identity(keep)
+    materializeUserSkills([skill],{dataDir:root})
+    expect(identity(file)).toEqual(before)
+    expect(identity(keep)).toEqual(keepBefore)
+    materializeUserSkills([{...skill,files:[{...files[0]!,content:files[0]!.content+'\nChanged'},files[1]!,{path:'references/new/extra.md',content:'Extra'}]}],{dataDir:root})
+    expect(await readFile(file,'utf8')).toContain('Changed')
+    expect(statSync(file,{bigint:true}).ino).not.toBe(before.ino)
+    expect(identity(keep)).toEqual(keepBefore)
+    expect(existsSync(join(folder,'references/remove.md'))).toBe(false)
+    expect(await readFile(join(folder,'references/new/extra.md'),'utf8')).toBe('Extra\n')
+    materializeUserSkills([{...skill,enabled:false}],{dataDir:root})
+    expect(existsSync(folder)).toBe(false)
+  }finally{await rm(root,{recursive:true,force:true})}
 })

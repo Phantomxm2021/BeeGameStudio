@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, realpathSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { lstat, mkdir, open, readFile, realpath, unlink } from 'node:fs/promises'
 import { hostname } from 'node:os'
+import { auditAssetContract } from './asset-contract-audit'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
-import { array, boolean, discriminatedUnion, literal, object, record, string, union, unknown, url } from 'zod/v4'
-import { registerBeeGameLocalResources, readBeeGameAssetManifest, BEEGAME_RESOURCE_ROOTS, type BeeGameAuthoredResourceInput, type BeeGameAssetManifest } from './asset-contracts'
+import { array, boolean, discriminatedUnion, literal, never, object, record, string, union, unknown, url } from 'zod/v4'
+import { registerBeeGameLocalResources, readBeeGameAssetManifest, readBeeGameAssetManifestSync, BEEGAME_RESOURCE_ROOTS, type BeeGameAuthoredResourceInput, type BeeGameAssetManifest } from './asset-contracts'
 import { parseBeeGameProgrammaticAudioResource } from './programmatic-audio-resource'
-import { atlasRequestSchema, produceMedia } from './media-production'
 import { renderAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
+import type { ResourceLibraryUsage } from '@bee-game-studio/beegame-resource-core'
 
 const text = string().trim().min(1)
 const webSource = object({ type: literal('web'), source_url: url(), page_url: url(),
@@ -26,9 +27,25 @@ const resource = object({ id: text, fulfills: array(text), root_path: text, file
   }).optional(),
   dependencies: array(dependency).optional(),
 }).strict()
+// Acquisition results carry machine facts; the resource still declares its use.
+const registrationResource = resource.partial({ root_path: true, file_paths: true }).extend({ acquisition: text.optional() })
+  .refine(value => value.acquisition || value.root_path && value.file_paths,
+    { message: 'Supply root_path and file_paths, or acquisition: a saved generate/fetch/media result JSON path.' })
+const acquisitionFiles = object({ path: text, sha256: string().regex(/^[0-9a-f]{64}$/),
+  root_path: text.optional(), file_paths: array(text).min(1).optional(),
+  local_file_hashes: record(string(), string().regex(/^[0-9a-f]{64}$/)).optional(),
+})
+const acquisitionResult = union([
+  acquisitionFiles.extend({ source: union([literal('agent-authored'), literal('resource-library')]),
+    registrationSource: librarySource.optional(), dependencies: array(dependency).optional(),
+  }).passthrough(),
+  // Media processing supplies file facts, not a new copyright/provenance claim.
+  acquisitionFiles.extend({ operation: union([literal('images'), literal('atlas'), literal('atlas-frames')]),
+    source: never().optional(), registrationSource: never().optional(), dependencies: never().optional(),
+  }).passthrough(),
+])
 const requestSchema = discriminatedUnion('operation', [
-  atlasRequestSchema.extend({ resource: resource.omit({ root_path: true, file_paths: true }), registrationOutput: text }),
-  object({ operation: literal('register'), resources: array(resource),
+  object({ operation: literal('register'), resources: array(registrationResource),
     projectTarget: record(string(), unknown()).optional(),
     requirements: array(record(string(), unknown())).optional() }).strict(),
   object({ operation: literal('audio'), recipe: unknown(),
@@ -117,6 +134,42 @@ async function assetPath(root: string, path: string) {
   }
   return target
 }
+async function readAssetFile(root: string, path: string) {
+  const file = await open(await assetPath(root, path), constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
+  try {
+    if (!(await file.stat()).isFile()) throw Error('Acquisition input must be a regular file: ' + path)
+    return await file.readFile()
+  } finally { await file.close() }
+}
+
+async function resolveRegistrationResource(root: string, input: ReturnType<typeof registrationResource.parse>) {
+  const { acquisition, ...declared } = input
+  if (!acquisition) return resource.parse(declared)
+  const result = acquisitionResult.parse(JSON.parse((await readAssetFile(root, acquisition)).toString('utf8')))
+  const rootPath = result.root_path ?? result.path
+  if (rootPath !== result.path) throw Error('Acquisition root_path differs from its saved path')
+  const paths = result.file_paths ?? [rootPath]
+  if (!paths.includes(rootPath)) throw Error('Acquisition file_paths must include its root')
+  if (declared.root_path && declared.root_path !== rootPath) throw Error('Resource root_path conflicts with acquisition')
+  const declaredPaths = declared.file_paths
+  if (declaredPaths && paths.some(path => !declaredPaths.includes(path)))
+    throw Error('Resource file_paths cannot omit acquisition files')
+  const source = result.source === 'resource-library' ? librarySource.parse(result.registrationSource) : undefined
+  if (result.source !== undefined && declared.source && !isDeepStrictEqual(declared.source, source)) throw Error('Resource source conflicts with acquisition')
+  if (result.source !== undefined && declared.dependencies && !isDeepStrictEqual(declared.dependencies, result.dependencies ?? []))
+    throw Error('Resource dependencies conflict with acquisition')
+  const hashes = result.local_file_hashes ?? { [rootPath]: result.sha256 }
+  if (hashes[rootPath] !== result.sha256) throw Error('Acquisition root hash is inconsistent')
+  const acquisition_hashes = Object.fromEntries(paths.map(path => {
+    const expected = hashes[path]
+    if (!expected) throw Error('Acquisition is missing a file hash: ' + path)
+    return [path, expected]
+  }))
+  return { ...resource.parse({ ...declared, root_path: rootPath, file_paths: declaredPaths ?? paths,
+    ...(source ? { source } : {}), ...(result.dependencies ? { dependencies: result.dependencies } : {}) }),
+    acquisition_hashes }
+}
+
 async function guardRegistryPaths(root: string) {
   for (const path of ['assets/asset-manifest.json', 'assets/manifest/requirements', 'assets/manifest/resources'])
     await assetPath(root, path)
@@ -124,6 +177,26 @@ async function guardRegistryPaths(root: string) {
     const index = JSON.parse(await readFile(resolve(root, 'assets/asset-manifest.json'), 'utf8'))
     for (const path of [index.modules?.requirements, ...index.modules?.resources ?? []]) if (path) await assetPath(root, path)
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+}
+
+export async function checkRegisteredResources(workspace: string) {
+  const root = realpathSync(workspace), issues: string[] = []
+  const audit = auditAssetContract(root)
+  issues.push(...audit.issues)
+  if (!audit.present) issues.push('assets/asset-manifest.json is missing')
+  const manifest = (() => {
+    try { return readBeeGameAssetManifestSync(root) }
+    catch (error) { if (audit.present) issues.push(error instanceof Error ? error.message : String(error)); return undefined }
+  })()
+  return { valid: !issues.length, scope: 'registered-resources', issues: [...new Set(issues)],
+    requirements: audit.requirements,
+    resources: audit.resources.map(({ fileEvidence, ...resource }) => {
+      const registered = manifest?.resources.find(item => item.id === resource.id)
+      return { ...resource, assetKind: registered?.asset_kind, fulfills: registered?.fulfills,
+        files: fileEvidence.map(({ path, sha256, facts }) => ({ path, sha256, facts })) }
+    }),
+    requirementBindings: audit.bindings,
+    note: 'Checked Manifest requirements, registered files, hashes and supported structure. Structural unknowns identify facts not established by these file and declaration checks. No files changed.' }
 }
 
 /** Current registry operands, not a cached inventory or a quality judgment. */
@@ -241,31 +314,15 @@ export function renderAudioCue(cue: ReturnType<typeof parseBeeGameProgrammaticAu
   return { wav, peakBeforeNormalization: peak, normalizationGain: scale, sampleRate: rate, channels: 2, durationMs: frames * 1000 / rate }
 }
 
-export async function produceResources(workspace: string, value: unknown, fetcher: typeof fetch = fetch) {
+export async function produceResources(workspace: string, value: unknown, fetcher: typeof fetch = fetch, resourceLibraryUsage?: ResourceLibraryUsage) {
   const root = await realpath(workspace), request = parseResourceRequest(value)
-  if (request.operation === 'atlas') {
-    const { resource: item, registrationOutput, ...atlas } = request
-    await assetPath(root, registrationOutput)
-    if (!registrationOutput.endsWith('.json') || [atlas.output, atlas.metadata, ...atlas.frames.map(frame => frame.input)].includes(registrationOutput))
-      throw Error('registrationOutput must be a distinct new assets/*.json file')
-    const registration = { operation: 'register', resources: [{ ...item, root_path: atlas.output, file_paths: [atlas.output, atlas.metadata] }] }
-    // Plan the registration before writing pixels; a conflicting request file
-    // must not strand a newly generated atlas.
-    const bytes = Buffer.from(JSON.stringify(registration, null, 2) + '\n')
-    try {
-      if (!(await readFile(await assetPath(root, registrationOutput))).equals(bytes)) throw Error('Registration output already has different content: ' + registrationOutput)
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-    const media = await produceMedia(root, atlas, undefined, true)
-    await saveNew(root, registrationOutput, bytes)
-    return { ...media, registrationRequest: registrationOutput,
-      next: 'Shared resources owner: use the supplied resources.mjs entry with --register-from ' + registrationOutput }
-  }
   if (request.operation === 'register') {
     // The existing registry owns serialization/validation. Guard its exact
     // inputs and output directories before exposing it to the project CLI.
     await guardRegistryPaths(root)
-    for (const item of request.resources) for (const path of item.file_paths) await assetPath(root, path)
-    const ids = request.resources.map(item => item.id)
+    const resources = await Promise.all(request.resources.map(item => resolveRegistrationResource(root, item)))
+    for (const item of resources) for (const path of item.file_paths) await assetPath(root, path)
+    const ids = resources.map(item => item.id)
     if (new Set(ids).size !== ids.length) throw Error('Duplicate resource IDs in one registration batch')
     const lockPath = await assetPath(root, REGISTRATION_LOCK_PATH)
     await mkdir(dirname(lockPath), { recursive: true })
@@ -277,7 +334,8 @@ export async function produceResources(workspace: string, value: unknown, fetche
       const owner = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }
       await lock.writeFile(JSON.stringify({ version: REGISTRATION_LOCK_VERSION, operation: 'register', owner }) + '\n')
       await lock.sync()
-      const manifest = await registerBeeGameLocalResources(root, request.resources as BeeGameAuthoredResourceInput[], {
+      const manifest = await registerBeeGameLocalResources(root, resources as BeeGameAuthoredResourceInput[], {
+        resourceLibraryUsage,
         projectTarget: request.projectTarget as BeeGameAssetManifest['project_target'],
         requirements: request.requirements as BeeGameAssetManifest['requirements'],
       })
@@ -335,15 +393,16 @@ export const RESOURCE_HELP = `Usage: bun <resources-entry> request.json
   --register-from request-1.json request-2.json  Combine registration requests
   --registration-lock  Inspect registration lock owner/state (read-only)
   --list [RESOURCE-ID ...] [--details]  Read saved resource records
+  --check  Audit current registered files, hashes, requirements and structure (read-only)
   --contract registration  Input fields and complete minimal request
   --contract atlas | --contract tilemap  Format-specific reference
   --contract [full]  Complete registry reference
   --help full  Audio recipes, font acquisition and provenance fields
   --capabilities  Available operations
-Operations: register, audio, fonts, atlas. Atlas returns files and a registrationRequest for --register-from. Crop/resize uses media.mjs images; register its actual outputs. Processing does not call generation.
+Operations: register, audio, fonts. Registration may use acquisition:"assets/result.json" to reuse a saved generate/fetch/media result; declare id, fulfills, provisional, reason and selection_reason. Existing project configuration is reused when omitted. Media returns reusable acquisition file facts. Crop/resize uses media.mjs images; register its actual outputs. Processing does not call generation.
 Local files: omit source; supply resource.reason. The host computes hashes/modules. Web/library files need provenance; user files use the upload/import path.
-Use --contract registration when registration fields are missing from context; reuse an available contract. BGS roots are fixed: runtime_asset_root="${BEEGAME_RESOURCE_ROOTS.runtime}", generated_asset_root="${BEEGAME_RESOURCE_ROOTS.generated}"; registered files belong beneath "${BEEGAME_RESOURCE_ROOTS.runtime}/", independently of public runtime URLs. Keep projectTarget platform/runtime/roots/source preferences fixed. For format additions, resubmit asset_format_capabilities after checking runtime support; retain existing formats. See --help full. Keep actual requirement IDs consistent; these inputs are not the saved Manifest format.
-If registration.lock remains, the host operator must first confirm that BGS and every independent resources registration process have exited and that no other recovery is running. Then inspect this lock and move exactly assets/manifest/registration.lock aside while preserving a backup. Agents must not remove it based on a PID or their own confirmation.
+Use --contract registration for missing fields; reuse available definitions. BGS roots are fixed: runtime_asset_root="${BEEGAME_RESOURCE_ROOTS.runtime}", generated_asset_root="${BEEGAME_RESOURCE_ROOTS.generated}"; registered files belong beneath "${BEEGAME_RESOURCE_ROOTS.runtime}/", independently of public runtime URLs. Keep projectTarget platform/runtime/roots/source preferences fixed. Add formats only after checking runtime support; retain existing formats. Use actual requirement IDs; details: --help full.
+A retained registration.lock needs host-operator confirmation that all registration/recovery work has stopped before moving that exact lock aside with a backup. Agents must not remove locks; PID alone is not confirmation.
 No package installation is needed. Tools do not certify artistic or gameplay quality.`
 
 const RESOURCE_DETAILS = `Usage: bun <resources-entry> --capabilities
@@ -354,12 +413,13 @@ const RESOURCE_DETAILS = `Usage: bun <resources-entry> --capabilities
 --list reads the current registry without writing: all IDs/fulfills/default roots/statuses/file counts. Specified IDs also return exact member paths. --details returns full selected records including hashes/provenance. Do not cat every resource module or reread large persisted output merely to find binding operands.
 --registration-lock is read-only. If a lock remains after an interruption, the host operator must confirm that BGS and every independent resources registration process have exited and no other recovery is running, inspect the metadata, then move exactly assets/manifest/registration.lock aside while preserving a backup. Agents must not remove it based on a PID or their own confirmation.
 No package installation is needed. Existing image processing/atlas packing stays at media.mjs.
-atlas (resources.mjs request.json): media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Registration requests can be combined with --register-from. Existing images/media.mjs remain supported.
-register: {operation:"register",resources:[{id,fulfills,root_path,file_paths,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}],projectTarget?,requirements?}.
+Image crops, intact-sheet frame metadata and packing belong to media.mjs; register its saved acquisition receipt through this entry.
+register: {operation:"register",resources:[{id,fulfills,root_path?,file_paths?,acquisition?,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}],projectTarget?,requirements?}.
+acquisition is a project-relative assets/*.json containing the plain saved generate/fetch/media result (not an MCP envelope). It reuses paths, library provenance and dependencies, checks saved hashes against current files, and retains decoded root-file facts. Media results carry file facts only; declare the original source and dependencies when registering processed files. Additional authored metadata files may be included in file_paths; acquisition files/dependencies cannot be dropped or relabelled. It does not infer usage rights, suitability or supported runtime formats. Without acquisition, supply root_path/file_paths normally.
 Registration input is NOT a canonical manifest resource. For locally agent-authored files, omit source and supply resource.reason; the registrar writes source.type=agent-authored and created_at. Explicit source accepts only web or resource-library with the fields below. Do not copy canonical agent-authored/user-provided source objects, status, selected_at or local_file_hashes into a request. User-provided files use the upload/import path; do not relabel them as agent-authored.
 selection_reason is a non-empty string array, not a string. Encoded audio (including recipe-rendered WAV) uses asset_kind:"audio-clip" (or music/ambience/voice), never "audio". Structured synthesis JSON uses audio-cue/audio-bank and is not encoded playback evidence.
 projectTarget and requirements describe the whole project. A configuration request with resources:[] can be combined with resource requests using --register-from config.json resources-1.json resources-2.json. This is one registration batch, not repeated initialization.
-projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. runtime_asset_root is fixed at "${BEEGAME_RESOURCE_ROOTS.runtime}" and generated_asset_root at "${BEEGAME_RESOURCE_ROOTS.generated}"; register files under the runtime root, not a public URL root. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],resource_library_usage:"optional",runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT evidence that a runtime supports those formats. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one resource group’s file extensions.
+projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. runtime_asset_root is fixed at "${BEEGAME_RESOURCE_ROOTS.runtime}" and generated_asset_root at "${BEEGAME_RESOURCE_ROOTS.generated}"; register files under the runtime root, not a public URL root. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT evidence that a runtime supports those formats. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one resource group’s file extensions.
 Use --contract for exact requirement objects/enums without creating a Manifest. Use the actual resources/media entries supplied in the project context. Every fulfills ID must be an actual requirement id, not its display name or a resource id. Omit projectTarget to keep it, or resubmit the same platform/runtime/roots/source preferences with an expanded asset_format_capabilities list after checking the consumer supports those formats. Existing formats cannot be removed. Existing requirements cannot be redefined. Hashes and registry modules are computed, never supplied. Web resources use source:{type:"web",source_url,page_url,license,license_url?,retrieved_at}; fonts are not agent-authored. Library downloads return registrationSource:{type:"resource-library",pack_id,pack_version,element_id,element_path}; preserve it as source. Include required downloaded dependencies in file_paths and dependencies:[{key,parent_key,element_id,element_path,reference_path,local_path,kind?}]. Missing files or unregistered dependency paths fail registration; no manual manifest edits or source relabeling.
 Registration stdout lists resource IDs, file counts and the canonical manifest location; source facts, full paths and computed hashes remain in its modules. Append --details only when those full values are needed. Do not grep bundled implementations to discover these input fields.
 audio: {operation:"audio",recipe:{format:"beegame-programmatic-audio-v1",cues:[{id,duration_ms,loop?:{start_ms,end_ms},voices:[{source:{type:"oscillator",waveform:"sine"|"square"|"triangle"|"sawtooth",frequency_hz,end_frequency_hz?},start_ms,duration_ms,gain,attack_ms?,release_ms?,pan?}]}]},outputs:{"cue-id":"assets/runtime/cue.wav"},sampleRate?:44100}.
@@ -368,7 +428,7 @@ fonts: {operation:"fonts",jobs:[{url,output:"assets/runtime/font.woff2",licenseU
 Font and license URLs must be direct HTTPS fonts.gstatic.com or raw.githubusercontent.com/google/fonts/ downloads (no redirects). Saves font, licence and source sidecar, reuses intact same-source files. No subset, pip or compiler needed. Browser font decode/glyph checks remain mandatory. Other sources use existing authorized acquisition paths, not mislabelled provenance.
 Batch failures retain valid files and identify failed items. Retry only failed items. Production never declares appearance/listening quality passed.`
 
-export async function runResourceProductionCli(args = process.argv.slice(2)) {
+export async function runResourceProductionCli(args = process.argv.slice(2), context: { profile?: string; resourceLibraryUsage?: ResourceLibraryUsage } = {}) {
   try {
     if (args[0] === '--help') {
       if (args.length > 2 || (args[1] && args[1] !== 'full')) throw Error('Usage: --help [full]')
@@ -378,18 +438,26 @@ export async function runResourceProductionCli(args = process.argv.slice(2)) {
       const section = args[1] ?? 'full'
       if (args.length > 2 || !['registration', 'atlas', 'tilemap', 'full'].includes(section))
         throw Error('Usage: --contract [registration|atlas|tilemap|full]')
-      console.log(renderAssetManifestAuthoringContract(section as 'registration' | 'atlas' | 'tilemap' | 'full')); return
+      const target = (await readBeeGameAssetManifest(await realpath(process.cwd()))).project_target
+      if (context.resourceLibraryUsage && target?.resource_library_usage && context.resourceLibraryUsage !== target.resource_library_usage)
+        throw Error('Resource configuration conflicts with confirmed resource_library_usage: ' + context.resourceLibraryUsage)
+      console.log(renderAssetManifestAuthoringContract(section as 'registration' | 'atlas' | 'tilemap' | 'full', Boolean(target), context.resourceLibraryUsage ?? target?.resource_library_usage)); return
     }
     if (args[0] === '--capabilities') {
       console.log(JSON.stringify({ registration: true, audioSynthesisWav: true, fontDownload: true,
-        atlasWithRegistrationRequest: true, batchRegistrationFromFiles: true,
-        aiMusicGeneration: false, fontSubsetting: false, atlasCommand: 'resources.mjs request.json: atlas fields + resource + registrationOutput; media.mjs --help describes image processing fields',
+        batchRegistrationFromFiles: true,
+        aiMusicGeneration: false, fontSubsetting: false, mediaCommand: 'media.mjs --help',
         imageRuntimeConfigured: Boolean(process.env.BEEGAME_SHARP_MODULE) })); return
     }
     const root = await realpath(process.cwd())
     if (args[0] === '--registration-lock') {
       if (args.length !== 1) throw Error('Usage: --registration-lock')
       console.log(JSON.stringify(await inspectRegistrationLock(root))); return
+    }
+    if (args[0] === '--check') {
+      if (args.length !== 1) throw Error('Usage: --check')
+      const result = await checkRegisteredResources(root)
+      console.log(JSON.stringify(result)); process.exitCode = result.valid ? 0 : 1; return
     }
     const details = args.includes('--details')
     args = args.filter(arg => arg !== '--details')

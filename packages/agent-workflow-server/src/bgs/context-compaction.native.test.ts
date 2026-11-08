@@ -1,3 +1,4 @@
+import { writeFixturePlugin } from './fixtures/plugin'
 import { productionAssignmentFacts } from '../beegame/workflow-v3/production-workflow'
 import { createRun } from '../beegame/workflow-v3/state'
 import { expect, test } from 'bun:test'
@@ -10,7 +11,8 @@ const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 // Real CLI and local compaction, scripted loopback provider only. The summary
 // intentionally omits all host context: its survival must not depend on an LLM.
 nativeTest('current host context survives repeated compaction and resume without extra model calls', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-context-retention-test-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-context-retention-test-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game)
   await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
@@ -60,7 +62,7 @@ nativeTest('current host context survives repeated compaction and resume without
       regular = 0; compact = 0
       runtime = await runner.start({ sessionId: 'context-retention-fixture', cwd: game, ...contexts[phase], finalOutput,
         ...(phase ? { resumeSessionId: nativeSessionId } : {}),
-        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
           BEEGAME_API_PROTOCOL: 'chat-completions', OPENAI_API_KEY: 'fixture-only',
           OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
         nativeContext, onNativeContext: context => { nativeContext = context },
@@ -90,7 +92,8 @@ nativeTest('current host context survives repeated compaction and resume without
 }, 65_000)
 
 for(const invalid of ['tool-text','204','205'] as const) nativeTest('invalid local summary does not replace history or retry, and the existing thread can resume: '+invalid, async () => {
-  const root = await mkdtemp('/private/tmp/bgs-context-retention-test-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const root = await mkdtemp('/private/tmp/bgs-context-retention-test-'), game = join(root, 'game'), catalog = join(root, 'plugin-source', 'bgs-game-skills')
+  await mkdir(catalog,{recursive:true})
   await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline fixture.\n---\nFixture.')
   let compact = 0, regular = 0, sessionId = '', recovering = false, recoveredInput = ''
@@ -125,9 +128,9 @@ for(const invalid of ['tool-text','204','205'] as const) nativeTest('invalid loc
     return { url, addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
   } })
   let runtime: Awaited<ReturnType<typeof runner.start>> | undefined
-  const start = () => runner.start({ sessionId: 'summary-rejection-fixture', cwd: game,
+  const start = async () => runner.start({ sessionId: 'summary-rejection-fixture', cwd: game,
     ...(recovering ? { resumeSessionId: sessionId } : {}),
-    env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+    env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: await writeFixturePlugin(catalog),
       OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
     onNativeSessionId: id => { sessionId = id }, requestPermission: async () => ({ behavior: 'deny' }),
   })

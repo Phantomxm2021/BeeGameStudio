@@ -1,0 +1,137 @@
+{
+  "trace": [
+    {
+      "at": 1793440167622,
+      "type": "click",
+      "name": "Begin"
+    },
+    {
+      "at": 1793440167741,
+      "type": "click",
+      "name": "Pause"
+    },
+    {
+      "at": 1793440168467,
+      "type": "click",
+      "name": "Resume"
+    },
+    {
+      "at": 1793440168468,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440168469,
+      "type": "up",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440168469,
+      "type": "down",
+      "code": "Escape"
+    },
+    {
+      "at": 1793440168470,
+      "type": "up",
+      "code": "Escape"
+    }
+  ],
+  "frames": [
+    {
+      "name": "title",
+      "file": "platformer-before-1280x800-title.png",
+      "beforeCapture": {
+        "at": 274.8999996185303,
+        "state": "Ready",
+        "text": "Grounded",
+        "focus": "Begin",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 410.2999997138977
+    },
+    {
+      "name": "play",
+      "file": "platformer-before-1280x800-play.png",
+      "beforeCapture": {
+        "at": 466,
+        "state": "Playing",
+        "text": "Grounded",
+        "focus": "Pause",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 527.8999996185303
+    },
+    {
+      "name": "pause-0",
+      "file": "platformer-before-1280x800-pause-0.png",
+      "beforeCapture": {
+        "at": 532.1999998092651,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [
+          {
+            "time": 0,
+            "state": "running",
+            "duration": 220
+          }
+        ],
+        "reduced": false
+      },
+      "afterCaptureAt": 690.1999998092651
+    },
+    {
+      "name": "pause-1",
+      "file": "platformer-before-1280x800-pause-1.png",
+      "beforeCapture": {
+        "at": 748.5999999046326,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [
+          {
+            "time": 199.93100008368492,
+            "state": "running",
+            "duration": 220
+          }
+        ],
+        "reduced": false
+      },
+      "afterCaptureAt": 905.0999999046326
+    },
+    {
+      "name": "pause-2",
+      "file": "platformer-before-1280x800-pause-2.png",
+      "beforeCapture": {
+        "at": 1126.7999997138977,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [],
+        "reduced": false
+      },
+      "afterCaptureAt": 1254.6999998092651
+    },
+    {
+      "name": "rapid-return",
+      "file": "platformer-before-1280x800-rapid-return.png",
+      "beforeCapture": {
+        "at": 1632.0999999046326,
+        "state": "Paused",
+        "text": "Grounded",
+        "focus": "Resume",
+        "animations": [
+          {
+            "time": 149.9349999643862,
+            "state": "running",
+            "duration": 220
+          }
+        ],
+        "reduced": false
+      },
+      "afterCaptureAt": 1790.5999999046326
+    }
+  ]
+}

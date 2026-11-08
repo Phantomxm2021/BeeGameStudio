@@ -36,7 +36,6 @@ import {
   type BeeGameSkillsConfig,
 } from '@bee-game-studio/beegame-skills-core/config'
 import {
-  clearRuntimeBuiltinSkills,
   resolveBuiltinSkillsDirectory,
   materializeUserSkills,
 } from '@bee-game-studio/beegame-skills-core/store'
@@ -822,7 +821,6 @@ export class DashboardRepository {
     modelConfigId?: string,
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
-    clearRuntimeBuiltinSkills({ dataDir })
     const builtinSkillsDir = resolveBuiltinSkillsDirectory()
     if (this.supabaseStore && userId) {
       const client = this.options.supabaseRuntimeEnvClient
@@ -856,9 +854,6 @@ export class DashboardRepository {
       if (selectedId && !selectedModel) throw new Error('Selected model is no longer available')
       const selectedModelEnv = selectedModel ? resolveModelConnection(dataDir, selectedModel.config, selectedModel.env) : {}
       const runtimeSettings = this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
-      const mcpServers = await this.authorizeRuntimeMcpServers(
-        await this.supabaseForAuthToken(authToken).runtimeMcpServers(userId), userId, authToken)
-      await this.materializeRemoteUserSkillsSafely(userId, dataDir)
       // Supabase owns logical runtime configuration (provider credentials and
       // platform feature flags). The runtime host owns physical isolation. Do
       // not allow an RPC payload to select another user's runtime config root.
@@ -868,7 +863,6 @@ export class DashboardRepository {
         ...selectedModelEnv,
         ...hostIsolationEnv,
         [BEEGAME_MODEL_BILLING_SOURCE]: getModelBillingSource(selectedModelEnv),
-        BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(mcpServers),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
         BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
         NPM_CONFIG_CACHE: hostIsolationEnv.NPM_CONFIG_CACHE,
@@ -877,7 +871,6 @@ export class DashboardRepository {
         npm_config_userconfig: hostIsolationEnv.npm_config_userconfig,
       }
     }
-    if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir)
     const platformEnv = this.mapLocalPlatformRuntimeSettingsToEnv(dataDir)
     const selectedId = modelConfigId ?? preferredModelId(dataDir)
     // Explicit model IDs are authorized at the request boundary. Defaults stay owner-scoped.
@@ -890,10 +883,30 @@ export class DashboardRepository {
       ...platformEnv,
       ...selectedModelEnv,
       [BEEGAME_MODEL_BILLING_SOURCE]: getModelBillingSource(selectedModelEnv),
-      BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(await this.authorizeRuntimeMcpServers(
-        exportMcpServersSnapshot({ dataDir }), userId, authToken)),
       BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
     }
+  }
+
+  /** Prepare only a real Agent startup/resume, never a plain model request. */
+  async prepareAgentRuntimeEnv(
+    userDataRoot?: string,
+    userId?: string,
+    authToken?: string,
+    modelConfigId?: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, string>> {
+    signal?.throwIfAborted()
+    const env = await this.getRuntimeEnv(userDataRoot, userId, authToken, modelConfigId)
+    signal?.throwIfAborted()
+    const dataDir = userDataRoot ?? this.options.dashboardDataRoot
+    const servers = this.supabaseStore && userId
+      ? await this.supabaseForAuthToken(authToken).runtimeMcpServers(userId)
+      : exportMcpServersSnapshot({ dataDir })
+    const authorized = await this.authorizeRuntimeMcpServers(servers, userId, authToken)
+    signal?.throwIfAborted()
+    if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir, signal)
+    signal?.throwIfAborted()
+    return { ...env, BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(authorized) }
   }
 
   private async authorizeRuntimeMcpServers(
@@ -910,17 +923,22 @@ export class DashboardRepository {
   private async materializeRemoteUserSkillsSafely(
     userId: string,
     dataDir: string,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted()
     if (this.options.skillsConfig === false) {
       materializeUserSkills([], { dataDir })
       return
     }
     const config = this.options.skillsConfig ?? resolveBeeGameSkillsConfig()
     try {
-      const skills = await fetchEnabledUserSkills(config, userId)
+      const skills = await fetchEnabledUserSkills(config, userId, signal)
+      signal?.throwIfAborted()
       materializeUserSkills(skills, { dataDir })
       this.warnedSkillSyncFailures.delete(userId)
     } catch (err) {
+      // Cancellation is not a failed sync or permission to delete active files.
+      signal?.throwIfAborted()
       if (config.required) {
         throw new Error('User skills synchronization failed', { cause: err })
       }

@@ -10,6 +10,8 @@ WORKDIR /app
 COPY package.json bun.lock bunfig.toml tsconfig.json tsconfig.base.json ./
 COPY apps/frontend/package.json ./apps/frontend/package.json
 COPY apps/desktop/package.json ./apps/desktop/package.json
+COPY apps/game-portal/package.json ./apps/game-portal/package.json
+COPY apps/game-delivery/package.json ./apps/game-delivery/package.json
 COPY packages/scene-editor/package.json ./packages/scene-editor/package.json
 COPY packages/agent-workflow-server/package.json ./packages/agent-workflow-server/package.json
 COPY packages/agent-workflow/package.json ./packages/agent-workflow/package.json

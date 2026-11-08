@@ -1,0 +1,22 @@
+[
+  {
+    "at": 1793438183705,
+    "type": "click",
+    "name": "Start"
+  },
+  {
+    "at": 1793438183706,
+    "type": "click",
+    "name": "Build bottom"
+  },
+  {
+    "at": 1793438189619,
+    "type": "click",
+    "name": "Restart"
+  },
+  {
+    "at": 1793438189621,
+    "type": "click",
+    "name": "Build top"
+  }
+]

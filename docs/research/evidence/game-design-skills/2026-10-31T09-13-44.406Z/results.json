@@ -1,0 +1,854 @@
+{
+  "status": "passed",
+  "scope": "four synthetic genres; observed controls and one controlled repair/retest",
+  "modelCalls": 0,
+  "modelTokens": 0,
+  "newDependencies": [],
+  "durationMs": 18140,
+  "observations": [
+    {
+      "scenario": "collection-before",
+      "genre": "collection",
+      "design_intent": "Restart starts a clean round",
+      "hypothesis": "One catch after restart produces one catch without an earlier-round entity.",
+      "sourceSha256": "205af97c0de2459060591581ec558ec8767184c7fa8e3ef91a2f72e622b7ab51",
+      "mode": "real-input-on-synthetic-fixture",
+      "observed_facts": [
+        "Playing — Score 2 / 3; Misses 0 / 3"
+      ],
+      "inferences": [
+        "Only the tested route is established; scripted knowledge does not prove discoverability."
+      ],
+      "unverified_questions": [
+        "Representative novice comprehension, enjoyment, motion quality and aesthetics need appropriate player observation."
+      ],
+      "input_trace": [
+        {
+          "at": 1793438024662,
+          "type": "click",
+          "name": "Start"
+        },
+        {
+          "at": 1793438024874,
+          "type": "click",
+          "name": "Restart"
+        },
+        {
+          "at": 1793438024875,
+          "type": "down",
+          "code": "ArrowRight"
+        },
+        {
+          "at": 1793438025877,
+          "type": "up",
+          "code": "ArrowRight"
+        }
+      ],
+      "initialScreenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/collection-before-initial.png",
+      "recording": {
+        "id": "4fed524c-84b6-438f-b663-38f8cc546b30",
+        "label": "collection-before",
+        "conditions": {
+          "source": "agent-declared",
+          "text": "Synthetic local fixture; 800x600; ordinary keyboard/buttons; no state injection; not novice research"
+        },
+        "preview": {
+          "mode": "development",
+          "fixture": "collection"
+        },
+        "observedEnvironment": {
+          "status": "observed",
+          "viewport": {
+            "width": 800,
+            "height": 600
+          },
+          "devicePixelRatio": 1,
+          "maxTouchPoints": 0,
+          "coarsePointer": false,
+          "hover": true
+        },
+        "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+        "startedAt": "2026-10-31T09:13:44.586Z",
+        "endedAt": "2026-10-31T09:13:47.147Z",
+        "durationMs": 2560,
+        "status": "finished",
+        "endReason": "scenario-finished",
+        "observationStatus": "finished",
+        "gameplayVerdict": "not-evaluated",
+        "droppedEvents": 0,
+        "truncatedEvents": 0,
+        "counts": {
+          "observer.started": 1,
+          "navigation": 1,
+          "console.log": 6
+        },
+        "events": [
+          {
+            "at": "2026-10-31T09:13:44.588Z",
+            "type": "observer.started",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "about:",
+              "earlierConsoleHistoryExcluded": true
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:44.589Z",
+            "type": "navigation",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/collection.html"
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:44.672Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"start\",\"state\":\"Playing\",\"at\":82.10000038146973}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:44.875Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"restart\",\"state\":\"Playing\",\"at\":285.5}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:44.876Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-down\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":286.7000002861023}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:45.879Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":1288.7000002861023}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:46.172Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"caught\",\"value\":1,\"state\":\"Playing\",\"at\":1579.7000002861023}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:46.389Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"caught\",\"value\":2,\"state\":\"Playing\",\"at\":1797.3000001907349}"
+            ]
+          }
+        ],
+        "files": {
+          "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/4fed524c-84b6-438f-b663-38f8cc546b30.json",
+          "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/4fed524c-84b6-438f-b663-38f8cc546b30.png"
+        },
+        "screenshotAvailable": true
+      }
+    },
+    {
+      "scenario": "collection-after",
+      "genre": "collection",
+      "design_intent": "Restart starts a clean round",
+      "hypothesis": "One catch after restart produces one catch without an earlier-round entity.",
+      "sourceSha256": "dffd77c8f8fe8b7a0950cf1e3731e002ec6749598d6c7d330a0264031b6c6237",
+      "mode": "real-input-on-synthetic-fixture",
+      "observed_facts": [
+        "Playing — Score 1 / 3; Misses 0 / 3"
+      ],
+      "inferences": [
+        "Only the tested route is established; scripted knowledge does not prove discoverability."
+      ],
+      "unverified_questions": [
+        "Representative novice comprehension, enjoyment, motion quality and aesthetics need appropriate player observation."
+      ],
+      "input_trace": [
+        {
+          "at": 1793438027218,
+          "type": "click",
+          "name": "Start"
+        },
+        {
+          "at": 1793438027421,
+          "type": "click",
+          "name": "Restart"
+        },
+        {
+          "at": 1793438027422,
+          "type": "down",
+          "code": "ArrowRight"
+        },
+        {
+          "at": 1793438028425,
+          "type": "up",
+          "code": "ArrowRight"
+        }
+      ],
+      "initialScreenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/collection-after-initial.png",
+      "recording": {
+        "id": "f8c2a3ab-6a45-4490-acdc-1e94fe5d87e5",
+        "label": "collection-after",
+        "conditions": {
+          "source": "agent-declared",
+          "text": "Synthetic local fixture; 800x600; ordinary keyboard/buttons; no state injection; not novice research"
+        },
+        "preview": {
+          "mode": "development",
+          "fixture": "collection"
+        },
+        "observedEnvironment": {
+          "status": "observed",
+          "viewport": {
+            "width": 800,
+            "height": 600
+          },
+          "devicePixelRatio": 1,
+          "maxTouchPoints": 0,
+          "coarsePointer": false,
+          "hover": true
+        },
+        "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+        "startedAt": "2026-10-31T09:13:47.149Z",
+        "endedAt": "2026-10-31T09:13:49.686Z",
+        "durationMs": 2537,
+        "status": "finished",
+        "endReason": "scenario-finished",
+        "observationStatus": "finished",
+        "gameplayVerdict": "not-evaluated",
+        "droppedEvents": 0,
+        "truncatedEvents": 0,
+        "counts": {
+          "observer.started": 1,
+          "navigation": 1,
+          "console.log": 5
+        },
+        "events": [
+          {
+            "at": "2026-10-31T09:13:47.151Z",
+            "type": "observer.started",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/collection.html",
+              "earlierConsoleHistoryExcluded": true
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:47.152Z",
+            "type": "navigation",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/collection.html"
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:47.219Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"start\",\"state\":\"Playing\",\"at\":67.2999997138977}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:47.422Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"restart\",\"state\":\"Playing\",\"at\":270.69999980926514}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:47.423Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-down\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":271.19999980926514}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:48.426Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":1274.0999999046326}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:48.911Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"caught\",\"value\":1,\"state\":\"Playing\",\"at\":1756.5999999046326}"
+            ]
+          }
+        ],
+        "files": {
+          "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/f8c2a3ab-6a45-4490-acdc-1e94fe5d87e5.json",
+          "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/f8c2a3ab-6a45-4490-acdc-1e94fe5d87e5.png"
+        },
+        "screenshotAvailable": true
+      }
+    },
+    {
+      "scenario": "platformer",
+      "genre": "platformer",
+      "design_intent": "Jump consequences and recovery lead to the flag",
+      "hypothesis": "Walking into the gap loses; restart and a timed jump reach the flag.",
+      "sourceSha256": "563ba8cbb345e49664f9bea1b1d43d002ae5b8cc146af61159e60be0ce434dfb",
+      "mode": "real-input-on-synthetic-fixture",
+      "observed_facts": [
+        "Lost — Airborne",
+        "Won — Grounded"
+      ],
+      "inferences": [
+        "Only the tested route is established; scripted knowledge does not prove discoverability."
+      ],
+      "unverified_questions": [
+        "Representative novice comprehension, enjoyment, motion quality and aesthetics need appropriate player observation."
+      ],
+      "input_trace": [
+        {
+          "at": 1793438029764,
+          "type": "click",
+          "name": "Start"
+        },
+        {
+          "at": 1793438029765,
+          "type": "down",
+          "code": "ArrowRight"
+        },
+        {
+          "at": 1793438031136,
+          "type": "up",
+          "code": "ArrowRight"
+        },
+        {
+          "at": 1793438031139,
+          "type": "click",
+          "name": "Restart"
+        },
+        {
+          "at": 1793438031140,
+          "type": "down",
+          "code": "ArrowRight"
+        },
+        {
+          "at": 1793438031941,
+          "type": "down",
+          "code": "Space"
+        },
+        {
+          "at": 1793438032026,
+          "type": "up",
+          "code": "Space"
+        },
+        {
+          "at": 1793438033808,
+          "type": "up",
+          "code": "ArrowRight"
+        }
+      ],
+      "initialScreenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/platformer-initial.png",
+      "recording": {
+        "id": "455c86c1-7b98-422a-a207-95b8168f529c",
+        "label": "platformer",
+        "conditions": {
+          "source": "agent-declared",
+          "text": "Synthetic local fixture; 800x600; ordinary keyboard/buttons; no state injection; not novice research"
+        },
+        "preview": {
+          "mode": "development",
+          "fixture": "platformer"
+        },
+        "observedEnvironment": {
+          "status": "observed",
+          "viewport": {
+            "width": 800,
+            "height": 600
+          },
+          "devicePixelRatio": 1,
+          "maxTouchPoints": 0,
+          "coarsePointer": false,
+          "hover": true
+        },
+        "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+        "startedAt": "2026-10-31T09:13:49.687Z",
+        "endedAt": "2026-10-31T09:13:53.845Z",
+        "durationMs": 4158,
+        "status": "finished",
+        "endReason": "scenario-finished",
+        "observationStatus": "finished",
+        "gameplayVerdict": "not-evaluated",
+        "droppedEvents": 0,
+        "truncatedEvents": 0,
+        "counts": {
+          "observer.started": 1,
+          "navigation": 1,
+          "console.log": 11
+        },
+        "events": [
+          {
+            "at": "2026-10-31T09:13:49.689Z",
+            "type": "observer.started",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/collection.html",
+              "earlierConsoleHistoryExcluded": true
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:49.690Z",
+            "type": "navigation",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/platformer.html"
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:49.765Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"start\",\"state\":\"Playing\",\"at\":74.5}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:49.765Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-down\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":75}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:51.120Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"fall\",\"state\":\"Lost\",\"at\":1428.1999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:51.139Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"ArrowRight\",\"state\":\"Lost\",\"at\":1448.0999999046326}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:51.141Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"restart\",\"state\":\"Playing\",\"at\":1450.1999998092651}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:51.141Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-down\",\"value\":\"ArrowRight\",\"state\":\"Playing\",\"at\":1450.7999997138977}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:51.944Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-down\",\"value\":\"Space\",\"state\":\"Playing\",\"at\":2252.699999809265}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:51.954Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"jump\",\"state\":\"Playing\",\"at\":2262.199999809265}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:52.028Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"Space\",\"state\":\"Playing\",\"at\":2336.9000000953674}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:53.806Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"goal\",\"state\":\"Won\",\"at\":4111.699999809265}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:53.809Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"key-up\",\"value\":\"ArrowRight\",\"state\":\"Won\",\"at\":4118.5}"
+            ]
+          }
+        ],
+        "files": {
+          "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/455c86c1-7b98-422a-a207-95b8168f529c.json",
+          "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/455c86c1-7b98-422a-a207-95b8168f529c.png"
+        },
+        "screenshotAvailable": true
+      }
+    },
+    {
+      "scenario": "puzzle",
+      "genre": "puzzle",
+      "design_intent": "Visible consequences can be reversed",
+      "hypothesis": "Middle changes the pattern; undo restores it; left/right solves the authored puzzle.",
+      "sourceSha256": "bbbb039327c60e8229ae9e4c39b0373b81247878fc1a535b87085f82a00b346c",
+      "mode": "real-input-on-synthetic-fixture",
+      "observed_facts": [
+        "Middle produces 010; Undo restores 101.",
+        "Won — Lights 000"
+      ],
+      "inferences": [
+        "Only the tested route is established; scripted knowledge does not prove discoverability."
+      ],
+      "unverified_questions": [
+        "Representative novice comprehension, enjoyment, motion quality and aesthetics need appropriate player observation."
+      ],
+      "input_trace": [
+        {
+          "at": 1793438033914,
+          "type": "click",
+          "name": "Start"
+        },
+        {
+          "at": 1793438033915,
+          "type": "click",
+          "name": "Toggle middle"
+        },
+        {
+          "at": 1793438033969,
+          "type": "click",
+          "name": "Undo"
+        },
+        {
+          "at": 1793438034025,
+          "type": "click",
+          "name": "Toggle left"
+        },
+        {
+          "at": 1793438034028,
+          "type": "click",
+          "name": "Toggle right"
+        }
+      ],
+      "initialScreenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/puzzle-initial.png",
+      "recording": {
+        "id": "7e81856d-6622-4af0-b266-d1975428b7ce",
+        "label": "puzzle",
+        "conditions": {
+          "source": "agent-declared",
+          "text": "Synthetic local fixture; 800x600; ordinary keyboard/buttons; no state injection; not novice research"
+        },
+        "preview": {
+          "mode": "development",
+          "fixture": "puzzle"
+        },
+        "observedEnvironment": {
+          "status": "observed",
+          "viewport": {
+            "width": 800,
+            "height": 600
+          },
+          "devicePixelRatio": 1,
+          "maxTouchPoints": 0,
+          "coarsePointer": false,
+          "hover": true
+        },
+        "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+        "startedAt": "2026-10-31T09:13:53.847Z",
+        "endedAt": "2026-10-31T09:13:54.098Z",
+        "durationMs": 251,
+        "status": "finished",
+        "endReason": "scenario-finished",
+        "observationStatus": "finished",
+        "gameplayVerdict": "not-evaluated",
+        "droppedEvents": 0,
+        "truncatedEvents": 0,
+        "counts": {
+          "observer.started": 1,
+          "navigation": 1,
+          "console.log": 6
+        },
+        "events": [
+          {
+            "at": "2026-10-31T09:13:53.849Z",
+            "type": "observer.started",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/platformer.html",
+              "earlierConsoleHistoryExcluded": true
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:53.850Z",
+            "type": "navigation",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/puzzle.html"
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:53.915Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"start\",\"state\":\"Playing\",\"at\":65.10000038146973}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:53.916Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"toggle\",\"value\":1,\"state\":\"Playing\",\"at\":66.30000019073486}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:53.970Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"undo\",\"state\":\"Playing\",\"at\":119.90000009536743}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:54.027Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"toggle\",\"value\":0,\"state\":\"Playing\",\"at\":177.2000002861023}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:54.029Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"toggle\",\"value\":2,\"state\":\"Playing\",\"at\":178.60000038146973}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:54.029Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"solved\",\"state\":\"Won\",\"at\":178.60000038146973}"
+            ]
+          }
+        ],
+        "files": {
+          "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/7e81856d-6622-4af0-b266-d1975428b7ce.json",
+          "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/7e81856d-6622-4af0-b266-d1975428b7ce.png"
+        },
+        "screenshotAvailable": true
+      }
+    },
+    {
+      "scenario": "defense",
+      "genre": "defense",
+      "design_intent": "A placement changes the announced lane outcome",
+      "hypothesis": "Bottom cannot defend top; a restarted top placement can.",
+      "sourceSha256": "d188416b9fd97b6d1d4164f2e94f429715b3969d78313a952bb07a83a9acc046",
+      "mode": "real-input-on-synthetic-fixture",
+      "observed_facts": [
+        "Lost — Incoming top lane; Budget 0; Defended 0",
+        "Won — Incoming top lane; Budget 0; Defended 1"
+      ],
+      "inferences": [
+        "Only the tested route is established; scripted knowledge does not prove discoverability."
+      ],
+      "unverified_questions": [
+        "Representative novice comprehension, enjoyment, motion quality and aesthetics need appropriate player observation."
+      ],
+      "input_trace": [
+        {
+          "at": 1793438034176,
+          "type": "click",
+          "name": "Start"
+        },
+        {
+          "at": 1793438034177,
+          "type": "click",
+          "name": "Build bottom"
+        },
+        {
+          "at": 1793438040090,
+          "type": "click",
+          "name": "Restart"
+        },
+        {
+          "at": 1793438040091,
+          "type": "click",
+          "name": "Build top"
+        }
+      ],
+      "initialScreenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/defense-initial.png",
+      "recording": {
+        "id": "6eec845f-ee6c-4d62-9ca3-3498c38a5241",
+        "label": "defense",
+        "conditions": {
+          "source": "agent-declared",
+          "text": "Synthetic local fixture; 800x600; ordinary keyboard/buttons; no state injection; not novice research"
+        },
+        "preview": {
+          "mode": "development",
+          "fixture": "defense"
+        },
+        "observedEnvironment": {
+          "status": "observed",
+          "viewport": {
+            "width": 800,
+            "height": 600
+          },
+          "devicePixelRatio": 1,
+          "maxTouchPoints": 0,
+          "coarsePointer": false,
+          "hover": true
+        },
+        "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+        "startedAt": "2026-10-31T09:13:54.099Z",
+        "endedAt": "2026-10-31T09:14:02.542Z",
+        "durationMs": 8443,
+        "status": "finished",
+        "endReason": "scenario-finished",
+        "observationStatus": "finished",
+        "gameplayVerdict": "not-evaluated",
+        "droppedEvents": 0,
+        "truncatedEvents": 0,
+        "counts": {
+          "observer.started": 1,
+          "navigation": 1,
+          "console.log": 6
+        },
+        "events": [
+          {
+            "at": "2026-10-31T09:13:54.101Z",
+            "type": "observer.started",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/puzzle.html",
+              "earlierConsoleHistoryExcluded": true
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:54.103Z",
+            "type": "navigation",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": {
+              "url": "http://127.0.0.1:55417/defense.html"
+            }
+          },
+          {
+            "at": "2026-10-31T09:13:54.177Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"start\",\"state\":\"Playing\",\"at\":74.40000009536743}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:13:54.177Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"build\",\"value\":\"bottom\",\"state\":\"Playing\",\"at\":75.09999990463257}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:14:00.078Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"base-hit\",\"state\":\"Lost\",\"at\":5975.900000095367}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:14:00.091Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"restart\",\"state\":\"Playing\",\"at\":5988.900000095367}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:14:00.092Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"build\",\"value\":\"top\",\"state\":\"Playing\",\"at\":5990.099999904633}"
+            ]
+          },
+          {
+            "at": "2026-10-31T09:14:02.498Z",
+            "type": "console.log",
+            "targetId": "7460BAA3E4294218F15E37F7556EA93F",
+            "detail": [
+              "game-event",
+              "{\"event\":\"defended\",\"state\":\"Won\",\"at\":8392.299999713898}"
+            ]
+          }
+        ],
+        "files": {
+          "report": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/6eec845f-ee6c-4d62-9ca3-3498c38a5241.json",
+          "screenshot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/research/evidence/game-design-skills/2026-10-31T09-13-44.406Z/6eec845f-ee6c-4d62-9ca3-3498c38a5241.png"
+        },
+        "screenshotAvailable": true
+      }
+    }
+  ]
+}

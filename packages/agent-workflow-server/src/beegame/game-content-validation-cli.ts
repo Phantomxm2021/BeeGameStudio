@@ -1,5 +1,4 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-export { runContentBindingCli } from './content-binding'
 import { readDesignSections, reviewSourceSnapshot } from './design-source-reading'
 import { sceneUiContentFormat } from './scene-ui-content-authoring'
 export { CONTENT_DRAFT_EXAMPLES } from './scene-ui-content-authoring'
@@ -694,3 +693,18 @@ export { runMediaProductionCli } from './media-production'
 export { runResourceProductionCli } from './resource-production'
 
 if (import.meta.main) await runGameContentCli()
+
+// Historical standalone checker; not part of the Agent resource/media runtime.
+export const CONTENT_CHECKER_ENTRY = `// BGS-managed checker entry. Run --help for the interface; this is not game source.
+try {
+  if (!process.versions.bun) throw new Error('BGS_BUN_REQUIRED: Run this entry with bun, not node (including --help). The shared content/media/resource implementation targets Bun; this is not a missing project dependency.');
+  const moduleUrl = process.env.BEEGAME_CONTENT_CHECKER_MODULE;
+  if (!moduleUrl) throw new Error('Content checker runtime is unavailable. Run this command in the BGS project execution environment.');
+  const { runGameContentCli } = await import(moduleUrl);
+  await runGameContentCli(process.argv.slice(2), { profile: 'current' });
+} catch (error) {
+  console.log(JSON.stringify({ valid: false, issues: [error instanceof Error ? error.message : String(error)] }));
+  process.exitCode = 1;
+}
+`
+

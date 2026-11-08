@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { ProductionBlockedError } from '../production-blocked'
+import { confirmedResourceLibraryUsage } from '../confirmed-brief-context'
+import { requiredLibraryDeliverySources } from '../asset-contract-audit'
+import { BeeGameAssetManifestError } from '../asset-contracts'
 import type { BeeGamePreviewManager, BeeGamePreviewSnapshot } from '../preview-manager'
-import { messageProductionAssignment, initialProductionAssignment, productionAssignmentPrompt, DESIGN_DECISION_SCOPE, PRODUCTION_WORKFLOW_GUIDANCE, prepareProductionHandoff, verifyProductionHandoff, productionOutputSchema, parseProductionResult, prepareDesignDocumentHandoff, type ProductionAssignment } from './production-workflow'
+import { messageProductionAssignment, initialProductionAssignment, settledAdvance, creativeStageInput, isContinuousGameAuthor, productionAssignmentPrompt, productionAssignmentBaseInstructions, productionWorkflowToolDescription, selectedProductionVisualSources, DESIGN_DECISION_SCOPE, PRODUCTION_WORKFLOW_GUIDANCE, prepareProductionHandoff, verifyProductionHandoff, productionOutputSchema, parseProductionResult, prepareDesignDocumentHandoff, type ProductionAssignment } from './production-workflow'
 import { z } from 'zod/v4'
-import { readSessionTranscriptFactsFromDisk, type BeeGameAttachment, type BeeGameSessionManager, type StartBeeGameSessionInput, type BeeGameNativeGoalInput, type BeeGameEvent } from '../session-manager'
+import { readSessionTranscriptFactsFromDisk, type BeeGameAttachment, type BeeGameTurnTools, type BeeGameSessionManager, type StartBeeGameSessionInput, type BeeGameNativeGoalInput, type BeeGameEvent } from '../session-manager'
 import { pauseRun, digest, isInitialSliceTurn, WorkflowError, type Run, type AgentTurn, type AgentMessage, type DesignFileChanges, type ProjectFileChanges } from './state'
 import { sameJson, type WorkflowStore } from './store'
 import { skillEvidence } from './context'
@@ -14,11 +18,12 @@ import { isWebCodeTarget } from './web-project-start'
 import { artifactDigest } from '../runtime-acceptance'
 import { PROJECT_DESIGN_PATHS, snapshotDesignRevisionFiles, designRevisionFileDigest } from '../design-handoff'
 import { projectFiles, projectDependencies, changedProjectPaths, AGENT_SOURCE_EXCLUSIONS } from './checks'
-import { assertDesignReviewReady, assertDesignReviewCoverage, designReviewProgress, type DesignReviewReceipt } from './design-review'
-import { designDocumentSource, designDocumentSnapshot, productionAssignmentFacts } from './production-workflow'
+import { assertDesignReviewReady, designReviewProgress, type DesignReviewReceipt } from './design-review'
+import { designDocumentSource, designDocumentSnapshot, productionAssignmentFacts, verificationImplementation, implementationVerificationHandoff, implementationVerificationOutputSchema, parseImplementationVerification } from './production-workflow'
 
 type AgentExecutionOptions = Partial<StartBeeGameSessionInput> & {
   developmentPreview?: () => BeeGamePreviewManager
+  previewOrigin?: string
   attachments?: BeeGameAttachment[]
   openImage?: (context: { stage: ProductionAssignment['stage'] | undefined; requirements: string; requireGdd: boolean }) => AgentImageAccess | Promise<AgentImageAccess>
 }
@@ -48,10 +53,8 @@ export const agentMessageSchema = z.object({
 // Business data, authorization and shared coordination; specialist methods stay in Skills.
 const enginePlatformContext = 'Preserve the user-selected engine and platform in bgsConfirmedBrief.settings. These settings are fixed at project confirmation. Chat messages and design edits cannot change them; if a later request proposes a different target, explain this limitation and retain the confirmed platform and engine. For screen targets, orientation Auto means adapting the same game to landscape and portrait containers; Landscape and Portrait retain their explicitly selected direction. Reference/design dimensions are layout coordinates, not an implicit minimum playable window.'
 const nativeRuntimeContext = 'When implementation is authorized, use the confirmed engine/platform native scene, UI and resource sources. BGS Scene/UI editor JSON and content/index.json are not production deliverables on any platform. Runtime choice does not determine composition or art style, or authorize coding in visual-only work.'
-const resourceAuthorizationContext = 'Honor explicit resource sources, resource-library preferences, usage rights and suitable supplied assets. When producing or changing game or UI artwork, read the applicable artwork-production guidance in game-content-pipeline-engineer before choosing its source or representation; reuse guidance retained in context. Carry confirmed user source requirements, GDD appearance targets and any selected pictures into that choice. Resource-library usage optional permits other artwork sources; neither that setting nor the absence of user-named asset files makes required artwork optional or selects programmatic drawing. Decide fallback eligibility from actual source findings and current tool capabilities, not untested assumptions that generation is risky or slow. Failed sourcing does not authorize changing those requirements or calling placeholders final. Retain required licenses.'
-// Native execution owns scheduling; the host supplies only shared-write and authority boundaries.
-const limitedParallelWorkContext = 'BGS limited parallel work: delegate only useful independent work with ready inputs, within native capacity and the current authorization. Give children relevant constraints, source paths, allowed writes and the expected result. Avoid overlapping writers; the parent owns shared records and integration. Wait for child work and tools to stop before reassigning writes. Child completion is not verification of the integrated result.'
-const webLibraryContext = 'For a new Web/React project, select the gameplay library internally from the confirmed presentation: Phaser for 2D and Three.js for 3D. React remains the confirmed application choice; retain the selected library in the project package/configuration. Preserve existing runtime dependencies when modifying a project. User Preview runs in a sandboxed opaque iframe inside a resizable panel. Its CSS viewport is the available game container, not the display resolution; use that container for layout and scaling. Preview may use a URL subpath; root-absolute asset/content URLs can escape that path, and native localStorage/sessionStorage can throw.'
+const resourceAuthorizationContext = 'Honor explicit resource sources, resource-library preferences, usage rights and suitable supplied assets. Preserve confirmed appearance and behavior requirements. Retain required licenses.'
+const webLibraryContext = 'Preserve existing runtime dependencies when modifying a project. User Preview runs in a sandboxed opaque iframe inside a resizable panel. Its CSS viewport is the available game container, not the display resolution; use that container for layout and scaling. Managed Vite Preview already rebases file-like root-relative static URLs under its base; extensionless app/API routes are unchanged. Native localStorage/sessionStorage can throw in the opaque iframe.'
 // Native execution reads production guidance from the saved project guide once.
 export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation' | 'requirements'>>, followup = false) => [
   DESIGN_DECISION_SCOPE,
@@ -59,7 +62,6 @@ export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVers
   nativeRuntimeContext,
   ...(isWebCodeTarget(run.requirements?.constraints) ? [webLibraryContext] : []),
   resourceAuthorizationContext,
-  limitedParallelWorkContext,
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
   return [...(edits.length ? ['User-authorized source saves since the preceding native turn:\n'+
@@ -79,7 +81,7 @@ function agentRequestText(run: Run): string {
 }
 
 // The Agent owns implementation and verification; host completion records execution only.
-const implementationHandoff = 'Complete the currently authorized player behavior and adopted visual treatment. Choose verification for required behavior and affected risks. Reuse valid observations and recheck affected behavior after changes. Judge completion against those requirements and repair observed deviations. Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested. End with the implemented result, checks actually performed and remaining defects, unverified behavior or external blockers.'
+const implementationHandoff = 'Complete the currently authorized player behavior, presentation and feedback. Choose verification for required behavior and affected risks. Reuse valid observations and recheck affected behavior after changes. Judge completion against those requirements and repair observed deviations. End with the implemented result, checks actually performed and remaining defects, unverified behavior or external blockers.'
 
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
@@ -89,7 +91,7 @@ export function agentGoalPrompt(run: Run): string {
     implementationHandoff,
   ].join('\n\n')
   return [
-    'Complete the current user assignment in this project. Select relevant Skills, organize the work and self-check the requested deliverables. Respect the production dependencies for work in scope; do not infer additional deliverables from the project creation mode. Stop at the requested boundary.',
+    'Complete the current user assignment in this project. Respect the production dependencies for work in scope; do not infer additional deliverables from the project creation mode. Stop at the requested boundary.',
     'Use the complete confirmed goal supplied in bgsConfirmedBrief.',
     implementationHandoff,
   ].join('\n\n')
@@ -98,6 +100,9 @@ export function agentGoalPrompt(run: Run): string {
 const designAnswerSchema = z.object({
   status: z.literal('answered').describe('Answer the current message without changing or submitting the GDD'),
   summary: z.string().trim().min(1).describe('The answer in the response language'),
+  // Strict transport schemas also carry these fields. Answers cannot submit sources or dispositions.
+  sections: z.array(z.never()).optional(), files: z.array(z.never()).optional(),
+  reviewResponses: z.array(z.never()).optional(),
 }).strict()
 
 // Chat can carry a production binding without scheduling work or requiring a
@@ -131,6 +136,7 @@ function designReviewReceipts(run: Run, turn: AgentTurn): DesignReviewReceipt[] 
 function productionContextChanged(previous: AgentTurn | undefined, production: ProductionAssignment | undefined, message?: AgentMessage): boolean {
   return Boolean(previous && (previous.production || production) &&
     (previous.production?.stage !== production?.stage || previous.production?.originRequestKey !== production?.originRequestKey ||
+      previous.production?.verificationOf !== production?.verificationOf ||
       production && previous.message && !message))
 }
 
@@ -348,7 +354,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if (!saved.quiescedAt) throw new WorkflowError('writer-unresolved', 'Native exit is not confirmed')
       if(i===0 && (saved.production?.stage==='visual' || saved.production?.stage==='resources'))
         projectChanges=await observeProjectFileChanges(current,saved)
-      const failure=failed ?? (projectChanges?.status==='unverified' && saved.productionHandoff?.next?.stage!=='implementation'
+      const failure=failed ?? (saved.production?.stage === 'verification' && !saved.implementationVerification
+        ? 'Verification ended without a valid native result; no completion or repair was scheduled' : undefined) ?? (projectChanges?.status==='unverified' && saved.productionHandoff?.next?.stage!=='implementation'
         ? 'Project input changes could not be verified: '+projectChanges.error : undefined)
       const next = structuredClone(current), result = next.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
       if(projectChanges)result.projectFileChanges=projectChanges
@@ -356,7 +363,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       result.finishedAt = new Date().toISOString()
       if (failure) result.error = failure
       delete next.writer; next.version++
-      const missingHandoff=Boolean(saved.production && saved.production.stage!=='implementation' && !saved.productionHandoff &&
+      const missingHandoff=Boolean(saved.production && (!['implementation','verification'].includes(saved.production.stage) || isContinuousGameAuthor(current,saved.production)) && !saved.productionHandoff &&
         (!productionMessage(current,saved) || implementationInputsChanged(result)))
       const complete=!current.paused && !interrupted && !failure && !blocked && !missingHandoff &&
         (!nativeGoal || nativeGoal.status==='complete')
@@ -396,6 +403,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     let ownsDevelopmentPreview = false
     let previewStart: Promise<BeeGamePreviewSnapshot> | undefined
     let executionContext: Record<string, unknown> | undefined
+    let implementationReady: string | undefined
   // Capture once for this user turn, not at compact, context read or finalize.
   let before: Record<string, string | null> | undefined, snapshotError: string | undefined
   try { before = snapshotDesignRevisionFiles(run.workspacePath) }
@@ -415,7 +423,12 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
   }
     try {
       if (disposing || (await read(run)).paused) throw new Error('Worker stopped or user paused before dispatch')
-      const previous=run.agentTurns!.filter(t=>t.attemptId!==turn.attemptId).at(-1)
+      const precedingTurns=run.agentTurns!.filter(t=>t.attemptId!==turn.attemptId)
+      const latest=precedingTurns.at(-1)
+      // Return only the verifier's brief to the exact original author thread.
+      // Its browser/tool/image history stays in the separate verification thread.
+      const previous=latest?.production?.stage === 'verification' && turn.production?.stage === 'implementation'
+        ? verificationImplementation(run,latest.production) : latest
       const previousSnapshot = previous?.status === 'failed' && previous.production?.stage === 'implementation'
         ? input.sessions.runtimeSnapshot(run.chatSessionId) : undefined
       const binding = previousSnapshot?.executionIdentity
@@ -425,10 +438,30 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         binding.workerId === previous.workerId && binding.fence === previous.fence && binding.turnId === previous.turnId &&
         binding.nativeSubmitted !== true && previousSnapshot.turnDiagnostics?.turnId === previous.turnId &&
         previousSnapshot.turnDiagnostics.agentCalls === 0 && previousSnapshot.turnDiagnostics.usage.total_tokens === 0)
+      const productionChat = productionMessage(run,turn)
+      const baseInstructions=turn.production && !productionChat ? productionAssignmentBaseInstructions(run,turn.production) : undefined
+      const previousRole=previous?.production && !productionMessage(run,previous)
+        ? productionAssignmentBaseInstructions(run,previous.production) : undefined
       const taskChanged=productionContextChanged(previous,turn.production,turn.message)
-      const focused=taskChanged || freshContextRequested(turn.message,previous) || Boolean(previous?.nativeSessionId && previous.nativeRuntime !== 'bgs')
+      // Native resume retains custom base instructions when no override is sent.
+      // Leave an isolated role through the existing focused-context boundary;
+      // repair and pure resume keep the exact author/verifier history.
+      const focused=taskChanged || baseInstructions!==previousRole || freshContextRequested(turn.message,previous) || Boolean(previous?.nativeSessionId && previous.nativeRuntime !== 'bgs')
       const history=focused || turn.message || previous && turn.production ? await readSessionTranscriptFactsFromDisk(run.chatSessionId,run.workspacePath) : []
       if(focused)executionContext=focusedExecutionFacts(run,history)
+      if(turn.production?.stage === 'verification') {
+        const source=verificationImplementation(run,turn.production)
+        if(source.requirementsRevision!==run.requirements.revision)throw new WorkflowError('verification-requirements-changed','Verification requires the implementation of the current requirements')
+        const handoff=source.productionHandoff?.request
+        const summary=handoff?.summary ?? history.findLast(event=>event.turnId===source.turnId && event.type==='assistant.message')?.text
+        const previousResult=precedingTurns.findLast(item=>item.production?.originRequestKey===turn.production?.originRequestKey && item.implementationVerification)?.implementationVerification
+        const facts=focusedExecutionFacts(run,history)
+        executionContext={userInputs:{priorUserRequests:facts.priorUserRequests,otherUserMessages:facts.otherUserMessages,answeredQuestions:facts.answeredQuestions},
+          implementation:{attemptId:source.attemptId,...(summary?{summary}:{})},
+          ...(previousResult?{previousVerification:previousResult}:{}),
+          sourcePointers:productionAssignmentFacts(run,turn.production,turn.attemptId).precedingSources,
+          omitted:'Implementation planning, tool results, images, reasoning and native conversation history'}
+      }
       const previousGoal=observedNativeGoal(history,previous?.nativeSessionId)
       if(focused && previousGoal?.tokenBudget != null && previousGoal.status==='active' &&
         ['continue','change'].includes(turn.message?.intent ?? ''))
@@ -467,7 +500,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if (session.id!==run.chatSessionId) throw new Error('Native goal must use the bound project conversation')
       const userPrompt = turn.message ? agentMessagePrompt(turn.message,
         run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : ''
-      const productionChat = productionMessage(run,turn)
       const visualProduction = turn.production?.stage === 'visual'
       const prompt = nativeRecovery ? '' : turn.production?.stage === 'design' ? userPrompt || productionAssignmentPrompt(run,turn.production)
         : turn.production && !productionChat ? [productionAssignmentPrompt(run,turn.production),userPrompt].filter(Boolean).join('\n\n') : userPrompt || agentGoalPrompt(run)
@@ -507,13 +539,26 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
             authorized_user_changes:pendingChanges.filter(item=>item.intent==='change').map(({requestKey,text})=>({requestKey,text})),
             user_messages:pendingChanges.filter(item=>item.intent==='message').map(({requestKey,text})=>({requestKey,text})),
           }):''
-          if (turn.production?.stage === 'design') {
-            const designChat = productionMessage(run,turn)
+          const retainVisualSelection = async (current: Run, saved: AgentTurn, value: unknown) => {
+            const handoff = prepareProductionHandoff(current, saved, value)
+            if (sameJson(saved.visualSelection, handoff)) return { ...handoff, quality:'unverified', instruction:'Continue the current task; no stage transition.' }
+            const next = structuredClone(current); next.version++
+            next.agentTurns!.find(t => t.attemptId === turn.attemptId)!.visualSelection = handoff
+            await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.visual-sources-selected')
+            return { ...handoff, quality:'unverified', instruction:'Selected visual sources are retained for production and delivery. Continue in this same task; no stage transition or Manifest registration is required.' }
+          }
+          const creativeInput=turn.production && !productionChat && !nativeRecovery ? creativeStageInput(run,turn.production) : ''
+          const continuousAuthor = Boolean(turn.production && !productionChat && isContinuousGameAuthor(run,turn.production))
+          let authorFinalOutput: NonNullable<BeeGameTurnTools['finalOutput']> | undefined
+          if (turn.production?.stage === 'design' || continuousAuthor) {
+            const designChat = turn.production?.stage === 'design' ? productionChat : undefined
             const designContext = [
               enginePlatformContext,
               designChat
                 ? 'Current GDD handoff: the current document assignment and its affected design decisions. User assignment: ' + JSON.stringify(turn.message?.text || designChat.text)
-                : 'Current design handoff: the confirmed game and its next authorized production work. docs/GDD.md records the decisions that work needs.',
+                : continuousAuthor
+                  ? 'Current work develops and implements the confirmed player experience in the same author task. Review the resulting saved GDD decisions against the confirmed scope.'
+                  : 'Current design work develops the confirmed player experience. Its design record and any selected visual sources feed implementation.',
             ].join('\n')
             const currentDesignWriter = async () => {
               const current = await read(run), saved = current.agentTurns!.find(t => t.attemptId === turn.attemptId)
@@ -523,11 +568,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
               return current
             }
             const previousReviews = designReviewReceipts(run, turn)
-            const progress = designReviewProgress(previousReviews)
-            return {
-              turnContext: confirmedChanges,
-              systemContext: designContext + '\n' + DESIGN_DECISION_SCOPE,
-              finalOutput: { readOnly: true,
+            authorFinalOutput = { ...(continuousAuthor ? {} : {readOnly:true}),
                 ...(designChat ? { answer: async (value: unknown) => {
                   const answer = designAnswerSchema.safeParse(value)
                   if (!answer.success) return undefined
@@ -544,19 +585,10 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                   context: designContext + '\n' + DESIGN_DECISION_SCOPE,
                   previousReviews,
                   candidate: async value => {
-                    const current = await currentDesignWriter()
-                    const reviews = designReviewReceipts(current, current.agentTurns!.find(t => t.attemptId === turn.attemptId)!)
-                    const progress = designReviewProgress(reviews)
+                    await currentDesignWriter()
                     const request = parseProductionResult(turn.production!, value)
-                    const source = designDocumentSource(run.workspacePath), last = reviews.at(-1)
-                    // A cold parent can repeat its already-reviewed result. Reuse only
-                    // the same saved source and exact author response, never a new claim.
-                    const echoed = last && !progress.findings.length && sameJson(last.source, source) &&
-                      sameJson('reviewResponses' in request ? request.reviewResponses : undefined, last.authorResponses)
-                    assertDesignReviewCoverage('reviewResponses' in request ? request.reviewResponses ?? [] : [],
-                      echoed ? last.authorResponses?.length ?? 0 : progress.findings.length, 'GDD author round ' + (progress.rounds + 1))
-                    return { source, summary: request.summary,
-                      ...(!echoed && 'reviewResponses' in request ? { reviewResponses: request.reviewResponses } : {}) }
+                    return { source: designDocumentSource(run.workspacePath), summary: request.summary,
+                      ...('reviewResponses' in request ? { reviewResponses: request.reviewResponses } : {}) }
                   },
                   record: async receipt => {
                     const current = await currentDesignWriter()
@@ -566,25 +598,60 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                     await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.design-reviewed')
                   },
                 },
-                schema: designChat ? {anyOf:[productionOutputSchema(turn.production, progress.findings.length), z.toJSONSchema(designAnswerSchema, {target:'draft-7'})]}
-                  : productionOutputSchema(turn.production, progress.findings.length), accept: async (value: unknown) => {
+                schema: productionOutputSchema(turn.production!, Boolean(designChat)), accept: async (value: unknown) => {
                   const current = await currentDesignWriter()
                   const reviews = designReviewReceipts(current, current.agentTurns!.find(t => t.attemptId === turn.attemptId)!)
                   const request = parseProductionResult(turn.production!, value)
                   assertDesignReviewReady(designDocumentSource(run.workspacePath), reviews)
-                  const handoff = prepareDesignDocumentHandoff(run.workspacePath, request.summary)
-                  if (!designChat && turn.production!.stopAfter)
+                  const handoff = prepareDesignDocumentHandoff(run.workspacePath, request.summary, selectedProductionVisualSources(current))
+                  if (!designChat && run.creation?.creativeStages) handoff.next={...turn.production!,stage:'resources'}
+                  else if (!continuousAuthor && !designChat && turn.production!.stopAfter)
                     handoff.next = {...turn.production!, stage: turn.production!.stopAfter === 'implementation' ? 'implementation' : 'visual'}
                   const next = structuredClone(current); next.version++
                   next.agentTurns!.find(t => t.attemptId === turn.attemptId)!.productionHandoff = handoff
                   await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.production-handoff')
                   return request.summary
-                } },
+                } }
+            if (!continuousAuthor) {
+              tools = await openAgentTools({workspacePath:run.workspacePath,
+                constraints:run.requirements.constraints, sessionId:session.id, referenceOnly:true,
+                creativeTask:run.creation?.creativeStages ? 'design' : undefined,
+                getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken,
+                workflow:async value => {
+                  const current = await currentDesignWriter(), saved = current.agentTurns!.find(t => t.attemptId === turn.attemptId)!
+                  if (value && typeof value === 'object' && 'action' in value && value.action === 'status')
+                    return {assignment:productionAssignmentFacts(current,saved.production!,saved.attemptId),handoff:saved.visualSelection ?? null}
+                  if (run.creation?.creativeStages) throw new WorkflowError('design-read-only','The adopted direction is already settled; submit the saved GDD through the final result')
+                  if (!value || typeof value !== 'object' || !('action' in value) || value.action !== 'select-visual')
+                    throw new WorkflowError('design-read-only','Design may inspect status or select reference images; submit the saved GDD through final JSON')
+                  return retainVisualSelection(current, saved, value)
+                },
+                ...(!run.creation?.creativeStages && options.openImage ? {openImage:async()=>{
+                  await currentDesignWriter()
+                  return image=await options.openImage!({stage:'design',requirements:run.requirements.text,requireGdd:false})
+                }} : {})})
+              return {
+                ...tools,
+                workflowDescription: productionWorkflowToolDescription(turn.production,false,Boolean(run.creation?.creativeStages)),
+                turnContext: [confirmedChanges,creativeInput,tools?.turnContext].filter(Boolean).join('\n'),
+                systemContext: [designContext,DESIGN_DECISION_SCOPE,tools?.systemContext].filter(Boolean).join('\n'),
+                finalOutput: authorFinalOutput,
+              }
             }
           }
           const guide=projectGuideContext(await readProjectGuide(run.workspacePath))
+          const savedHandoff=(await read(run)).agentTurns!.find(item=>item.attemptId===turn.attemptId)!.productionHandoff
+          if(savedHandoff?.request.action==='advance' && savedHandoff.next?.stage==='verification') {
+            verifyProductionHandoff(run.workspacePath,savedHandoff)
+            requiredLibraryDeliverySources(run.workspacePath,confirmedResourceLibraryUsage(run.requirements.text))
+            implementationReady=savedHandoff.request.summary
+          }
           tools=await openAgentTools({ workspacePath:run.workspacePath, constraints:run.requirements.constraints,
+            resourceLibraryUsage:confirmedResourceLibraryUsage(run.requirements.text),
             sessionId:session.id,
+            referenceOnly: turn.production?.stage==='direction' || turn.production?.stage==='discovery',
+            creativeTask:turn.production?.stage==='direction' || turn.production?.stage==='discovery' ? turn.production.stage : undefined,
+            ...(run.creation?.creativeStages && turn.production ? {imageRequestScope:JSON.stringify([turn.production.originRequestKey,turn.production.stage])}:{}),
             libraryBaseUrl:input.resourceLibraryBaseUrl,
             getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken,
             workflow:async (value, signal)=>{
@@ -594,17 +661,17 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
               if(saved.quiescedAt)throw new WorkflowError('stale-attempt','Production writer has stopped')
               if (value && typeof value === 'object' && 'action' in value && value.action === 'preview') {
                 const request = z.object({ action: z.literal('preview'), operation: z.enum(['start', 'status']) }).strict().parse(value)
-                if (!options.developmentPreview || saved.production && saved.production.stage !== 'implementation')
+                if (!options.developmentPreview || saved.production && !['direction','implementation','verification'].includes(saved.production.stage))
                   throw new WorkflowError('preview-unavailable', 'Development preview is unavailable for this assignment')
                 developmentPreview ??= options.developmentPreview()
                 const existing = developmentPreview.runningForWorkspace(run.workspacePath)
                 let snapshot = existing ?? developmentPreview.status(run.chatSessionId, run.workspacePath)
                 if (request.operation === 'start') {
-                  if (existing && existing.mode === 'production')
+                  if (snapshot.mode === 'production' && ['starting', 'running'].includes(snapshot.status))
                     throw new WorkflowError('preview-conflict', 'A production preview is already running; it was not replaced')
                   if (!existing) {
                     if (!previewStart) {
-                      ownsDevelopmentPreview = true
+                      ownsDevelopmentPreview = snapshot.status !== 'starting'
                       previewStart = developmentPreview.start({ sessionId: run.chatSessionId,
                         workspacePath: run.workspacePath, signal }).finally(() => { previewStart = undefined })
                     }
@@ -614,58 +681,104 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                   const latest = await read(run)
                   if (!sameWriter(latest, turn) || latest.paused) throw new WorkflowError('stale-attempt', 'Preview request was cancelled')
                 }
-                return { status: snapshot.status, url: developmentPreview.internalUrl(snapshot.sessionId),
+                return { status: snapshot.status, url: snapshot.status === 'running' ? new URL(snapshot.url, options.previewOrigin).href : undefined,
                   message: snapshot.message, ...(snapshot.command?.includes('vite-preview-host.ts') ? { reloadAfterEdits: true } : {}) }
               }
               if(value && typeof value==='object' && 'action' in value && value.action==='status')
                 return {assignment:saved.production ?? null,handoff:saved.productionHandoff ?? null,quality:'unverified'}
-              if (saved.production?.stage === 'visual' && value && typeof value === 'object' &&
+              if (saved.production?.stage === 'verification')
+                throw new WorkflowError('verification-read-only','Verification may inspect status/preview; implementation and source handoffs belong to the author')
+              if (['visual','direction','discovery'].includes(saved.production?.stage ?? '') && value && typeof value === 'object' &&
                   'action' in value && value.action === 'advance')
                 throw new WorkflowError('visual-handoff-result-required', 'Submit selected visual image sources through the final ready result')
+              if (value && typeof value === 'object' && 'action' in value && value.action === 'select-visual')
+                return retainVisualSelection(current, saved, value)
               const handoff=prepareProductionHandoff(current,saved,value)
-              if (handoff.request.action === 'select-visual') {
-                if (sameJson(saved.visualSelection, handoff)) return { ...handoff, quality:'unverified', instruction:'Continue the current task; no stage transition.' }
-                const next = structuredClone(current); next.version++
-                next.agentTurns!.find(t => t.attemptId === turn.attemptId)!.visualSelection = handoff
-                await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.visual-sources-selected')
-                return { ...handoff, quality:'unverified', instruction:'Selected visual sources are retained for production and delivery. Continue in this same task; no stage transition or Manifest registration is required.' }
-              }
+              // In-place entry is already recorded by the current assignment;
+              // it must not occupy the immutable readiness handoff slot.
+              if(handoff.request.action==='implement' && !handoff.next && (continuousAuthor || current.creation?.verification==='isolated') &&
+                  saved.production?.stage==='implementation' && !productionMessage(current,saved) && !saved.productionHandoff)
+                return {...handoff,quality:'unverified',instruction:'Continue implementation in the current turn; this is not a readiness handoff.'}
               if(saved.productionHandoff) {
                 if(!sameJson(saved.productionHandoff,handoff))throw new WorkflowError('request-conflict','A different production handoff is already saved')
-                return saved.productionHandoff
+              } else {
+                const next=structuredClone(current);next.version++
+                next.agentTurns!.find(t=>t.attemptId===turn.attemptId)!.productionHandoff=handoff
+                await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.production-handoff')
               }
-              const next=structuredClone(current);next.version++
-              next.agentTurns!.find(t=>t.attemptId===turn.attemptId)!.productionHandoff=handoff
-              await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.production-handoff')
-              return {...handoff,quality:'unverified',instruction:handoff.request.action==='implement' && !handoff.next
-                ? 'Continue this authorized implementation in the current turn; choose verification and finish with its result and remaining work. No new turn is scheduled.'
-                : 'End this native turn; continuation occurs only after host cleanup.'}
+              if(handoff.request.action==='advance' && handoff.next?.stage==='verification') implementationReady=handoff.request.summary
+              return {...handoff,quality:'unverified',instruction:handoff.request.action==='implement' && saved.production?.stage==='implementation'
+                ? 'Continue the current authorized implementation in the current turn. This operation records work, not readiness.'
+                : 'The current assignment is handed off; BGS continues only after host cleanup.'}
             },
-            openImage:options.openImage ? async ()=>image=await options.openImage!({ stage: turn.production?.stage, requirements: run.requirements.text, requireGdd: Boolean(turn.production && ['visual', 'resources'].includes(turn.production.stage)) }) : undefined })
+            openImage:options.openImage && !['verification','discovery'].includes(turn.production?.stage ?? '') ? async ()=>image=await options.openImage!({ stage: turn.production?.stage, requirements: run.requirements.text, requireGdd: Boolean(turn.production && ['visual', 'resources'].includes(turn.production.stage)) }) : undefined })
+          // A stopped author can have committed readiness before native cleanup.
+          // Rebind that same handoff to this continuation; do not rerun self-tests.
+          let readySource=previous
+          while(nativeRecovery && readySource && !readySource.productionHandoff && readySource.message?.intent==='continue' &&
+              !readySource.message.text && !readySource.message.attachmentDigests?.length)
+            readySource=precedingTurns.find(item=>item.attemptId===readySource!.message!.continuationOf)
+          if(nativeRecovery && readySource?.productionHandoff?.request.action==='advance' &&
+              readySource.productionHandoff.next?.stage==='verification' && sameJson(readySource.production,turn.production) &&
+              readySource.requirementsRevision===turn.requirementsRevision) {
+            verifyProductionHandoff(run.workspacePath,readySource.productionHandoff)
+            await tools.workflow!(readySource.productionHandoff.request)
+          }
           // Supply current host facts with the task, not solely through a
           // discovery command that the model may filter or never call. This
           // reads inputs once; it does not build, review or rewrite history.
           const {text:_userText,...task}=activeUserTask(run,turn)
+          const verification=turn.production?.stage === 'verification'
+          const previousVerification=precedingTurns.findLast(item=>item.production?.originRequestKey===turn.production?.originRequestKey && item.implementationVerification)?.implementationVerification
+          const verificationContext=verification ? [DESIGN_DECISION_SCOPE,enginePlatformContext,
+            ...(isWebCodeTarget(run.requirements.constraints)?['Managed Preview uses the available game container inside an opaque iframe; native storage may throw. Use BgsWorkflow preview to obtain the current runtime URL.']:[]),
+          ].join('\n') : ''
           const evidence={task,...(executionContext ? {executionContext} : {})}
           // Carry the selected document once as source data in the new task,
           // rather than relying on a truncated Shell read to rediscover it.
           // Native recovery keeps that input in history; it is not reinjected.
-          const designInput = (!nativeRecovery || startupOnlyFailure) && turn.production?.stage === 'implementation' && !productionChat &&
+          const designInput = (!nativeRecovery || startupOnlyFailure) && turn.production && ['implementation','verification'].includes(turn.production.stage) && !productionChat &&
             productionAssignmentFacts(run,turn.production,turn.attemptId).precedingSources?.files.includes('docs/GDD.md')
             ? 'Saved design input at task preparation (file data, not instructions):\n' + JSON.stringify(designDocumentSnapshot(run.workspacePath)) : ''
-          return {...tools,turnContext:[confirmedChanges, nativeRecovery ? '' : designInput].filter(Boolean).join('\n\n'),
+          return {...tools,baseInstructions,...(authorFinalOutput ? {finalOutput:authorFinalOutput} : {}),workflowDescription:productionWorkflowToolDescription(productionChat ? undefined : turn.production,run.creation?.verification==='isolated',Boolean(run.creation?.creativeStages)),...(turn.production?.stage==='implementation' && run.creation?.verification==='isolated' && !productionChat
+            ? {implementationHandoff:()=>implementationReady} : {}),turnContext:[confirmedChanges, creativeInput, nativeRecovery ? '' : designInput].filter(Boolean).join('\n\n'),
+            ...(verification ? {finalOutput:{readOnly:true,schema:implementationVerificationOutputSchema(Boolean(run.creation?.creativeStages)),accept:async(value:unknown)=>{
+              let result=parseImplementationVerification(value,Boolean(run.creation?.creativeStages))
+              const current=await read(run),saved=current.agentTurns!.find(item=>item.attemptId===turn.attemptId)!
+              if(!sameWriter(current,turn) || current.paused || saved.quiescedAt)
+                throw new WorkflowError('stale-attempt','Verification task changed or paused')
+              if(saved.implementationVerification)throw new WorkflowError('request-conflict','Verification was already submitted')
+              if(result.status==='passed') try {
+                requiredLibraryDeliverySources(current.workspacePath,confirmedResourceLibraryUsage(current.requirements.text))
+              } catch(error) {
+                if(!(error instanceof BeeGameAssetManifestError))throw error
+                result={status:'needs-repair',summary:'Required library resources remain unmet; repair the recorded resource defects.',findings:error.issues}
+              }
+              const source=verificationImplementation(current,turn.production!)
+              const next=structuredClone(current);next.version++
+              const receipt=next.agentTurns!.find(item=>item.attemptId===turn.attemptId)!
+              receipt.implementationVerification=result
+              if(result.status==='needs-repair')receipt.productionHandoff={
+                request:{action:'advance',summary:result.summary,sections:[],files:[]},sources:[],next:{...source.production!},
+              }
+              await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.verification-recorded')
+              if(result.status==='blocked' || result.status==='incomplete')
+                throw new ProductionBlockedError(result.status==='incomplete' ? 'Required observations remain unfinished: '+result.summary : result.summary)
+              return result.summary
+            }}} : {}),
             ...(turn.production?.stage === 'implementation' && !productionChat && nativeRecovery && startupOnlyFailure ? {restartFromDesign: {
-                    prompt: [productionAssignmentPrompt(run, turn.production), designInput].filter(Boolean).join('\n\n'),
+                    prompt: [productionAssignmentPrompt(run, turn.production), creativeStageInput(run,turn.production), designInput].filter(Boolean).join('\n\n'),
                     authorize: async () => {
                       const current = await read(run)
                       if (!sameWriter(current, turn) || current.paused) throw new WorkflowError('stale-attempt', 'Implementation writer changed or paused')
+                      if (continuousAuthor) return
                       const design = current.agentTurns!.findLast(t => t.production?.stage === 'design' &&
-                        t.status === 'ended' && t.quiescedAt && t.productionHandoff?.next?.originRequestKey === turn.production!.originRequestKey)
+                        settledAdvance(current,t) && t.productionHandoff?.next?.originRequestKey === turn.production!.originRequestKey)
                       if (!design?.productionHandoff) throw new WorkflowError('invalid-continuation', 'No reviewed GDD handoff for this implementation')
                       verifyProductionHandoff(run.workspacePath, design.productionHandoff)
                     },
             }} : {}),
-            ...(turn.production && (!productionChat || visualProduction) && turn.production.stage !== 'implementation' ? {finalOutput:{
+            ...(turn.production && (!productionChat || visualProduction) && !['implementation','verification'].includes(turn.production.stage) ? {finalOutput:{
               ...(turn.production.stage === 'visual' ? {
                 ...(productionChat ? { answer: async (value: unknown) => {
                   const answer = designAnswerSchema.safeParse(value)
@@ -676,7 +789,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                   return answer.data.summary
                 } } : {}),
               } : {}),
-              schema: productionChat ? {anyOf:[productionOutputSchema(turn.production), z.toJSONSchema(designAnswerSchema, {target:'draft-7'})]} : productionOutputSchema(turn.production),
+              schema: productionOutputSchema(turn.production, Boolean(productionChat)),
               accept:async (value:unknown)=>{
                 const request=parseProductionResult(turn.production!,value)
                 const current=await read(run), saved=current.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
@@ -685,7 +798,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                 // A compatible saved native session may still use its explicit
                 // handoff tool. It must still survive the normal cleanup check.
                 if(!saved.productionHandoff) {
-                  if (turn.production?.stage === 'visual') {
+                  if (turn.production && ['visual','discovery','direction'].includes(turn.production.stage)) {
                     // Publish saved sources through the existing final-result boundary.
                     // Historical review receipts remain on their original turns.
                     const handoff = prepareProductionHandoff(current, saved, request)
@@ -697,8 +810,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                 return request.summary
               },
             }} : {}),
-            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+(productionChat && turn.production?.stage==='implementation' ? '\nThe current user message is the assignment boundary. Answer questions directly; carry out authorized implementation and choose its verification in this same turn. Finish with results and remaining work, without restarting earlier production stages. A BGS implementation handoff or delivery submission is not required.' : '')+(turn.production && !productionChat && turn.production.stage!=='implementation' ? '\n\n'+PRODUCTION_WORKFLOW_GUIDANCE : '')+'\n\n'+guide+'\n\n'+tools.systemContext+
-              '\n'+tools.turnContext+(nativeRecovery ? confirmedChanges : '')+(!nativeRecovery && !turn.production && turn.message && !assignment && ['message','work','change','continue'].includes(turn.message.intent) ? '\nThis message starts without a native Goal. Answer questions or perform authorized work within the current user assignment. Choose implementation and verification methods and finish in this turn; no additional implementation handoff is required. Do not expand the assignment.' : '')+'\nBGS current assignment: '+JSON.stringify(evidence)}
+            systemContext:(verification ? verificationContext : agentProfessionalContextForRun(run,Boolean(turn.message)))+(!verification && previousVerification ? '\nPrevious verification result (observations for affected repair, not a new user scope): '+JSON.stringify(previousVerification) : '')+(productionChat && turn.production?.stage==='implementation' ? '\nThe current user message is the assignment boundary. Answer questions directly; carry out authorized implementation and choose its verification in this same turn. Finish with results and remaining work, without restarting earlier production stages. A BGS implementation handoff or delivery submission is not required.' : '')+(turn.production && !productionChat && !['implementation','verification'].includes(turn.production.stage) ? '\n\n'+PRODUCTION_WORKFLOW_GUIDANCE : '')+'\n\n'+guide+'\n\n'+tools.systemContext+
+              '\n'+tools.turnContext+(nativeRecovery ? confirmedChanges : '')+(!nativeRecovery && !turn.production && turn.message && !assignment && ['message','work','change','continue'].includes(turn.message.intent) ? '\nThis message starts without a native Goal. Answer questions or perform authorized work within the current user assignment. Finish in this turn; no additional implementation handoff is required. Do not expand the assignment.' : '')+'\nBGS current assignment: '+JSON.stringify(evidence)}
         },
       })
       await input.sessions.waitForSessionIdle(session.id)
@@ -707,8 +820,14 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       blocked=events.findLast(e=>e.type==='turn.completed' && e.payload?.subtype==='production_blocked')?.text
       const failure=events.findLast(e=>e.type==='turn.failed')
       if(failure) throw new Error(failure.text || 'Agent turn failed; partial candidates are not accepted')
-      if (!turnId || !events.some(e=>e.type==='turn.completed') || events.some(e=>e.type==='turn.failed'))
-        throw new Error('Agent turn was interrupted or did not complete; existing work is retained')
+      if (!turnId || !events.some(e=>e.type==='turn.completed')) {
+        const current = await read(run)
+        const saved = current.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
+        // A deliberate pause may cancel the final native reply after its stage result was committed.
+        // The receipt must still pass source validation after cleanup and again on explicit continuation.
+        if (!(current.creation?.creativeStages && current.paused && saved.productionHandoff?.next))
+          throw new Error('Agent turn was interrupted or did not complete; existing work is retained')
+      }
       if (input.sessions.runtimeSnapshot(session.id).activeSubagentToolUseIds.length)
         throw new Error('Native background work is unfinished')
     } catch (error) { failed=error instanceof Error?error.message:'Agent execution failed' }
@@ -727,6 +846,26 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         if (ownsDevelopmentPreview) await developmentPreview!.stopAndWait(run.chatSessionId, run.workspacePath)
       }
     }
+    // Native implementation owns its verification and completion. Retain the
+    // required-source business check that isolated handoff previously performed.
+    if(!failed && !blocked && turn.production?.stage === 'implementation' && run.creation?.verification !== 'isolated' &&
+        !productionMessage(run,turn)) try {
+      const current=await read(run)
+      if(!current.paused) requiredLibraryDeliverySources(current.workspacePath,confirmedResourceLibraryUsage(current.requirements.text))
+    } catch(error) {failed=error instanceof Error?error.message:'Required resources are unavailable'}
+    if(!failed && !blocked && turn.production?.stage === 'implementation' && run.creation?.verification === 'isolated' &&
+        !productionMessage(run,turn)) try {
+      const current=await read(run),saved=current.agentTurns!.find(item=>item.attemptId===turn.attemptId)!
+      if(!current.paused && !saved.productionHandoff) {
+        if(!sameWriter(current,turn))throw new WorkflowError('stale-attempt','Implementation writer changed before verification handoff')
+        const next=structuredClone(current);next.version++
+        const summary=input.sessions.transcript(run.chatSessionId).findLast(event=>event.turnId===turnId && event.type==='assistant.message')?.text
+        next.agentTurns!.find(item=>item.attemptId===turn.attemptId)!.productionHandoff=implementationVerificationHandoff(current,saved,
+          summary || 'Implementation execution ended; inspect the saved outputs in separate verification.')
+        await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.production-handoff')
+      }
+    }
+    catch(error) {failed=error instanceof Error?error.message:'Implementation handoff failed'}
     // The terminal native claim does not excuse a cleanup-time source/report
     // change. Validate the submitted bytes after all owned writers are stopped.
     if(!failed)try {
@@ -773,7 +912,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       const previous=run.agentTurns.at(-1)
       const pending = previous?.productionHandoff ? previous.productionHandoff.next
         : previous?.production?.stage !== 'implementation' ? previous?.production : undefined
-      const settled = previous?.productionHandoff ? previous.status === 'ended'
+      const settled = previous?.productionHandoff ? previous.status === 'ended' || settledAdvance(run,previous)
         : previous && ['ended', 'failed', 'interrupted'].includes(previous.status)
       if(run.status!=='blocked' || !settled || previous?.attemptId!==continuation.after || !previous.quiescedAt ||
           !pending || !sameJson(pending,continuation.assignment))
@@ -782,7 +921,11 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     }
     const requestKey=continuation ? 'production:'+continuation.after : message?.requestKey ?? run.requestKey
     const previous=run.agentTurns.at(-1)
-    const production=continuation?.assignment ?? (message
+    const committedNext = message?.intent==='continue' && !message.text && !message.attachmentDigests?.length && previous && run.creation?.creativeStages && settledAdvance(run,previous)
+      ? previous.productionHandoff?.next : undefined
+    const production=continuation?.assignment ?? committedNext ?? (message?.intent==='continue' && previous?.production?.stage==='verification'
+      ? previous.status==='ended' && previous.productionHandoff?.next ? previous.productionHandoff.next : previous.production
+      : message
       ? messageProductionAssignment(run,requestKey,Boolean(previous && hasImplementationWork(run,previous) &&
         (run.status==='blocked' || ['failed','interrupted'].includes(previous.status)))) ?? (message.intent==='continue'
         ? previous?.status==='ended' && previous.productionHandoff ? previous.productionHandoff.next : previous?.production
@@ -917,7 +1060,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       return local?.runId===run.id && local.sessionId===run.chatSessionId && turn.sessionId===run.chatSessionId &&
         turn.workerId===workerId && sameWriter(run,turn) ? local.turnId : undefined
     },
-    writerLiveness(run: Run) { return !run.writer ? 'none' : active.has(run.writer.attemptId)?'local-active':'unknown' },
+    writerLiveness(run: Pick<Run, 'writer'>) { return !run.writer ? 'none' : active.has(run.writer.attemptId)?'local-active':'unknown' },
     async recoveryEvidence(run:Run) { return (await recoveryState(run)).evidence },
     recoveryDiagnostic:recoveryState,
     continueProduction:(run: Run, afterAttemptId: string, options: AgentExecutionOptions)=>{

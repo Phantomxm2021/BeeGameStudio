@@ -1,0 +1,42 @@
+[
+  {
+    "at": 1793438029764,
+    "type": "click",
+    "name": "Start"
+  },
+  {
+    "at": 1793438029765,
+    "type": "down",
+    "code": "ArrowRight"
+  },
+  {
+    "at": 1793438031136,
+    "type": "up",
+    "code": "ArrowRight"
+  },
+  {
+    "at": 1793438031139,
+    "type": "click",
+    "name": "Restart"
+  },
+  {
+    "at": 1793438031140,
+    "type": "down",
+    "code": "ArrowRight"
+  },
+  {
+    "at": 1793438031941,
+    "type": "down",
+    "code": "Space"
+  },
+  {
+    "at": 1793438032026,
+    "type": "up",
+    "code": "Space"
+  },
+  {
+    "at": 1793438033808,
+    "type": "up",
+    "code": "ArrowRight"
+  }
+]

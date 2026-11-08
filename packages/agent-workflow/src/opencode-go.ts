@@ -69,8 +69,11 @@ export function isOpenCodeGoProvider(value: unknown): value is OpenCodeGoProvide
 }
 
 export function getOpenCodeGoProvider(baseUrl: string | undefined): OpenCodeGoProvider | undefined {
+  const normalized = baseUrl?.replace(/\/$/, '')
+  // The official Codex endpoint shares Go's session-header requirements.
+  if (normalized === 'https://opencode.ai/inference/go/openai/v1') return 'openai-compatible'
   return Object.values(OPENCODE_GO_PROFILES)
-    .find(profile => profile.baseUrl === baseUrl?.replace(/\/$/, ''))?.provider
+    .find(profile => profile.baseUrl === normalized)?.provider
 }
 
 // Responses and Chat Completions share the same provider and base URL.

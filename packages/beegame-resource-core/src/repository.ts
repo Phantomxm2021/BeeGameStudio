@@ -7,7 +7,7 @@ import { resolveEffectiveResourceMetadata } from './metadata-policy'
 export type { ResourceElement, ResourceFolder, ResourcePack } from './types'
 
 export type ResourceRepository = {
-  listPacks(): Promise<PackSummary[]>
+  listPacks(options?: { includeCover?: boolean }): Promise<PackSummary[]>
   /** Pre-aggregated published Pack catalog; avoids loading every element. */
   listCatalogPacks?(): Promise<ResourceCatalogPack[]>
   getPack(packId: string): Promise<PackSummary | undefined>
@@ -40,8 +40,13 @@ export function createInMemoryResourceRepository(input: {
   })
   const resolvedElement = (element: ResourceElement): ResourceElement => resolveEffectiveResourceMetadata(element)
   return {
-    async listPacks() {
-      return packs.map(summary).sort((a, b) => a.name.localeCompare(b.name))
+    async listPacks(options) {
+      return packs.map(pack => {
+        const result = summary(pack)
+        if (options?.includeCover !== false) return result
+        const { coverPath: _cover, ...metadata } = result
+        return metadata
+      }).sort((a, b) => a.name.localeCompare(b.name))
     },
     async getPack(packId) {
       const pack = packs.find(item => item.id === packId)

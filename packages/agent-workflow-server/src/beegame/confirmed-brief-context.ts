@@ -36,3 +36,13 @@ function stringValue(value: unknown): string {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
+
+/** Older runs may contain a plain-text goal; never invent a source preference for them. */
+export function confirmedResourceLibraryUsage(value: string): ResourceLibraryUsage | undefined {
+  let brief: unknown
+  try { brief = JSON.parse(value) } catch { return undefined }
+  if (!isRecord(brief) || brief.kind !== 'confirmed_build_brief') return undefined
+  const usage = parseResourceLibraryUsage(brief.resource_library_usage)
+  if (!usage) throw Error('Confirmed brief context has an invalid resource_library_usage')
+  return usage
+}
