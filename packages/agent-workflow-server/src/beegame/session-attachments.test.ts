@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import sharp from 'sharp'
 import { BeeGameSessionManager, materializeBeeGameAttachments, prepareBeeGamePromptInput } from './session-manager'
 import { readChatAttachment } from './chat-attachments'
+import { projectHostDirectory } from './project-storage-paths'
 
 test('BGS image events snapshot project images and reject outside paths, symlinks and oversized files', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-image-preview-test-'))
@@ -27,6 +28,12 @@ test('BGS image events snapshot project images and reject outside paths, symlink
     expect(events).toHaveLength(4)
     const attachments = events[0]!.payload?.attachments as Array<{ storageId: string }>
     expect(attachments).toHaveLength(1)
+    const hostDirectory=join(projectHostDirectory(workspace),'chat-attachments')
+    expect(await readdir(hostDirectory)).toEqual([attachments[0]!.storageId])
+    expect(await readdir(workspace)).not.toContain('.beegame-attachments')
+    await expect(readChatAttachment(outside,attachments[0]!.storageId)).rejects.toThrow()
+    await writeFile(source,'Source changed after viewing')
+    await manager.dispose()
     const response = await readChatAttachment(workspace, attachments[0]!.storageId)
     const saved = Buffer.from(await response.arrayBuffer())
     expect(saved.equals(original)).toBe(true)
@@ -34,6 +41,7 @@ test('BGS image events snapshot project images and reject outside paths, symlink
     expect(events.slice(1).every(event => !event.payload?.attachments)).toBe(true)
   } finally {
     await manager.dispose()
+    await rm(projectHostDirectory(workspace), { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
     await rm(outside, { recursive: true, force: true })
   }
@@ -64,6 +72,7 @@ test('prompt uses image bytes but durable metadata contains only attachment refe
       { type: 'file', filename: 'brief.txt', mediaType: 'text/plain', data: 'YnJpZWY=' },
     ] })
     expect(prepared.attachments).toHaveLength(2)
+    expect(await readdir(workspace)).toContain('.beegame-attachments')
     expect(JSON.stringify(prepared.attachments)).not.toContain('aW1hZ2U=')
     expect(prepared.attachments[0]).not.toHaveProperty('relativePath')
     expect(prepared.prompt).toContainEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' } })

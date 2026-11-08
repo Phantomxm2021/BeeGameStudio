@@ -1890,7 +1890,8 @@ export class BeeGameSessionManager {
                 const mediaType = IMAGE_ATTACHMENT_TYPES[extname(path).toLowerCase()]?.[0]
                 if (info.isFile() && info.size <= MAX_BEEGAME_ATTACHMENT_BYTES && mediaType) {
                   const attachments = await materializeBeeGameAttachments(record.session.cwd, [{type:'image',
-                    mediaType: mediaType as BeeGameImageAttachment['mediaType'], data:(await readFile(path)).toString('base64')}])
+                    mediaType: mediaType as BeeGameImageAttachment['mediaType'], data:(await readFile(path)).toString('base64')}],
+                    join(projectHostDirectory(record.session.cwd), 'chat-attachments'))
                   payload = {...message,attachments:attachments.map(({relativePath:_path,...reference})=>reference)}
                 }
               }
@@ -2756,10 +2757,14 @@ export async function prepareBeeGamePromptInput(input: {
 export async function materializeBeeGameAttachments(
   workspace: string,
   attachments: BeeGameAttachment[],
+  destination?: string,
 ): Promise<MaterializedBeeGameFileAttachment[]> {
   if (attachments.length === 0) return []
-  const attachmentDirectory = join(workspace, '.beegame-attachments')
+  const root = await realpath(workspace)
+  const attachmentDirectory = destination ?? join(root, '.beegame-attachments')
   await mkdir(attachmentDirectory, { recursive: true })
+  if (await realpath(attachmentDirectory) !== resolve(attachmentDirectory))
+    throw new Error('Attachment directory cannot redirect through a symlink')
   const writtenPaths: string[] = []
   const results: MaterializedBeeGameFileAttachment[] = []
 
@@ -2797,7 +2802,7 @@ export async function materializeBeeGameAttachments(
       results.push({
         type: attachment.type,
         storageId: storedFilename,
-        relativePath: relative(workspace, storedPath),
+        relativePath: relative(root, storedPath),
         filename,
         mediaType: attachment.mediaType,
       })

@@ -761,12 +761,15 @@ test('managed asset commands reject absent or mismatched access and pin a paid a
   } finally { bridge.stop(true); replacement.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
-for(const mode of ['transparent','transparent-large','opaque','opaque-alpha','preview-unavailable'] as const)
+for(const mode of ['transparent','transparent-large','opaque','opaque-alpha','opaque-reference','opaque-reference-large','opaque-alpha-reference','preview-unavailable'] as const)
 test('image MCP returns source facts and a bounded viewing thumbnail without changing the paid image: '+mode,async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-image-mcp-preview-'))
-  const width=mode==='transparent-large'?1536:40,height=mode==='transparent-large'?1024:40
-  const original=await sharp({create:{width,height,channels:mode==='opaque'?3:4,
-    background:mode==='opaque'?'#d66':{r:10,g:20,b:30,alpha:mode==='opaque-alpha'?1:1/255}}}).png().toBuffer()
+  const reference=mode.includes('reference'), opaque=mode.startsWith('opaque')
+  const rgb=mode==='opaque'||mode.startsWith('opaque-reference')
+  const large=mode.endsWith('large')
+  const width=large?1536:40,height=large?1024:40
+  const original=await sharp({create:{width,height,channels:rgb?3:4,
+    background:opaque?'#d66':{r:10,g:20,b:30,alpha:1/255}}}).png().toBuffer()
   let calls=0
   const api=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     if(request.method==='GET')return Response.json({available:true,billingSource:'external'})
@@ -786,31 +789,36 @@ test('image MCP returns source facts and a bounded viewing thumbnail without cha
     for (const use of ['character reference sheets', 'per-character action pose sheets', 'game-element atlases', 'UI atlases', 'backgrounds', 'assets.mjs cost']) expect(description).toContain(use)
     expect(description).toContain('pose consistency, frame geometry and playback need inspection')
     expect(calls).toBe(0)
-    const result=await client.callTool({name:'generate_image',arguments:{request:{purpose:'production',prompt:'Synthetic artwork',background:mode==='opaque'?'opaque':'transparent'},outputPath:'assets/sheet.png'}})
+    const result=await client.callTool({name:'generate_image',arguments:{request:{purpose:reference?'reference':'production',prompt:'Synthetic artwork',background:opaque?'opaque':'transparent'},outputPath:'assets/sheet.png'}})
     expect(result.isError).not.toBe(true)
     if(!Array.isArray(result.content))throw Error('Missing MCP contents')
     const facts=JSON.parse(result.content[0].text)
     expect(facts).toMatchObject({path:'assets/sheet.png',sha256:createHash('sha256').update(original).digest('hex'),width,height,billingState:'generated',chargedCredits:0.0001})
-    if(mode!=='preview-unavailable')expect(facts).toMatchObject({hasAlpha:mode!=='opaque',isOpaque:mode.startsWith('opaque')})
+    if(mode!=='preview-unavailable')expect(facts).toMatchObject({hasAlpha:!rgb,isOpaque:opaque})
     else {expect(facts).not.toHaveProperty('isOpaque');expect(facts.imageFactsError).toEqual(expect.any(String))}
     expect((await readFile(join(root,'assets/sheet.png'))).equals(original)).toBe(true)
     const images=result.content.filter(item=>item.type==='image')
-    expect(images).toHaveLength(mode.startsWith('transparent')?1:0)
-    if(mode.startsWith('transparent')) {
+    expect(images).toHaveLength(mode.startsWith('transparent')||reference?1:0)
+    if(images.length) {
+      expect(facts.note).toContain('Use the attached viewing preview')
       expect(result.content.some(item=>item.type==='text'&&item.text.includes('not a production asset'))).toBe(true)
       expect(images[0].mimeType).toBe('image/webp')
       const preview=Buffer.from(images[0].data,'base64')
       const decoded=sharp(preview)
       expect((await decoded.metadata()).format).toBe('webp')
       const {data,info}=await decoded.ensureAlpha().raw().toBuffer({resolveWithObject:true})
-      expect([info.width,info.height]).toEqual(mode==='transparent-large'?[512,341]:[width,height])
+      expect([info.width,info.height]).toEqual(large?[512,341]:[width,height])
       expect(data.every((value,index)=>index%4!==3||value===255)).toBe(true)
-      if(mode!=='transparent-large') {
+      if(mode==='transparent') {
         expect([...data.subarray(0,4)]).toEqual([249,249,249,255])
         expect([...data.subarray(16*4,16*4+4)]).toEqual([219,219,219,255])
       }
       expect(preview.length).toBeLessThan((await decoded.png().toBuffer()).length)
-      expect(new Set(Array.from({length:info.width},(_,x)=>data[x*4])).size).toBeGreaterThan(1)
+      if(reference) {
+        expect(result.content.some(item=>item.type==='text'&&item.text.startsWith('Reference viewing thumbnail'))).toBe(true)
+        const expected=await sharp(original).resize({width:512,height:512,fit:'inside',withoutEnlargement:true}).ensureAlpha().raw().toBuffer()
+        expect(data.equals(expected)).toBe(true)
+      } else expect(new Set(Array.from({length:info.width},(_,x)=>data[x*4])).size).toBeGreaterThan(1)
     }
     if(mode==='preview-unavailable')expect(result.content.some(item=>item.type==='text'&&item.text.includes('Image saved; viewing preview unavailable'))).toBe(true)
     expect(calls).toBe(1)

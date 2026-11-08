@@ -278,7 +278,7 @@ function currentRuntimeContext(systemContext: string | undefined, finalOutput: B
         : '') + 'Other confirmed design records, BGS control files, credentials and the resource registry remain protected by the supplied filesystem permissions.',
     assignmentInstructions,
     systemContext,
-    process.platform === 'darwin' && !finalOutput?.readOnly
+    process.platform === 'darwin' && !finalOutput
       ? 'Native macOS filesystem notifications are unavailable in this sandbox; development watchers using an explicit polling option remain usable.' : undefined,
     finalOutput ? finalJsonContext(finalOutput.schema)
       : BEEGAME_USER_COMPLETION_FORMAT + '\nNo preparation JSON result is required for this task. Follow the response and delivery requirements of the current request.',

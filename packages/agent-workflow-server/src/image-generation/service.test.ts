@@ -150,8 +150,8 @@ test.each(['platform', 'byok'] as const)('final compiled prompt is checked befor
     calls++; return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
   } }), billing.client)
   const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root, source,
-    loadConfig: async () => config, service, reviewPrompt: async prompt => {
-      reviewInputs.push(imagePromptReviewInput(root, 'Confirmed user requirements', prompt))
+    loadConfig: async () => config, service, reviewPrompt: async (prompt, context) => {
+      reviewInputs.push(imagePromptReviewInput(root, 'Confirmed user requirements', prompt, true, context))
       checked.push(prompt)
       return review
     } })
@@ -164,7 +164,8 @@ test.each(['platform', 'byok'] as const)('final compiled prompt is checked befor
     expect(checked).toHaveLength(1)
     expect(checked[0]).toBe(request.prompt)
     const firstInput = JSON.parse(reviewInputs[0]!)
-    expect(Object.keys(firstInput).sort()).toEqual(['confirmedRequirements', 'design', 'prompt'])
+    expect(Object.keys(firstInput).sort()).toEqual(['confirmedRequirements', 'design', 'prompt', 'purpose', 'referenceImage'])
+    expect(firstInput).toMatchObject({purpose:'reference',referenceImage:null})
     expect(firstInput.confirmedRequirements).toBe('Confirmed user requirements')
     expect(firstInput.prompt).toBe(checked[0])
     expect(firstInput.design).toEqual([{ path: 'docs/GDD.md', sha256: new Bun.CryptoHasher('sha256').update(design).digest('hex'),
@@ -199,6 +200,53 @@ test.each(['platform', 'byok'] as const)('final compiled prompt is checked befor
     expect(record).toContain('prompt-checked')
     expect(record).toContain('image-prompt-conflict')
   } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('reference edits carry verified attachment identity and purpose into prompt checking', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-edit-review-'))
+  const billing = fakeBilling()
+  const bytes = await png()
+  mkdirSync(join(root, 'assets'), { recursive: true })
+  writeFileSync(join(root, 'assets/study.png'), bytes)
+  const received: unknown[] = [], reviews: unknown[] = []
+  let issues: string[] = []
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root, 'host'), { generate: async (_config, request) => {
+    received.push(request)
+    return { bytes, model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const access = openImageGenerationAccess({ userId:'owner', projectId:'project', workspacePath:root,
+    loadConfig:async()=>config, service, reviewPrompt:async(prompt, context)=>{
+      reviews.push(JSON.parse(imagePromptReviewInput(root, 'A basket moves left and right.', prompt, false, context)))
+      return {issues}
+    } })
+  const send = (request: object) => fetch(access.endpoint, {method:'POST',
+    headers:{'content-type':'application/json'}, body:JSON.stringify(request)})
+  const request = {purpose:'reference', requestId:'edit-background',
+    referenceImagePath:'assets/study.png', prompt:'Preserve the supplied orchard and remove apples from the background component.'}
+  try {
+    const missing = await send({...request, referenceImagePath:'assets/missing.png'})
+    expect(missing.status).toBe(400)
+    expect(reviews).toHaveLength(0)
+    const generated = await send(request)
+    expect(generated.status).toBe(200)
+    const saved = await generated.arrayBuffer()
+    const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex')
+    expect(reviews[0]).toMatchObject({purpose:'reference', referenceImage:{sha256,mimeType:'image/png'}, design:[]})
+    expect(JSON.stringify(reviews[0])).not.toContain('base64')
+    expect(received[0]).toMatchObject({referenceImage:{bytes,sha256}})
+    issues = ['The same apple is required both visible and absent in this image.']
+    const rejected = await send({...request, requestId:'conflicting-edit', prompt:'Keep and remove every apple.'})
+    expect(rejected.status).toBe(422)
+    expect(await rejected.json()).toMatchObject({code:'image-prompt-conflict'})
+    expect(received).toHaveLength(1)
+    expect(billing.actions).toEqual(['reserve','settle'])
+    // Paid recovery uses retained provider bytes and skips a new prompt review.
+    const recovered = await send(request)
+    expect(recovered.status).toBe(200)
+    expect(await recovered.arrayBuffer()).toEqual(saved)
+    expect(reviews).toHaveLength(2)
+    expect(received).toHaveLength(1)
+  } finally { await access.close(); rmSync(root, { recursive:true, force:true }) }
 })
 
 test('invalid or unavailable prompt checking never becomes permission to generate', async () => {

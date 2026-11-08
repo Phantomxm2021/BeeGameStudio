@@ -40,6 +40,41 @@ test('notification drain includes queued terminal events even when the RPC reply
   } finally {release();await client.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('search completion preserves literal Unicode line separators across stdout chunks', async () => {
+  // Reduced from the search completion of three-miss-apple-catch, 2026-11-09.
+  const excerpt = 'Define an \u2028\nObstacle Region'
+  const structuredContent = {results:[{excerpts:[excerpt]}]}
+  const params = {item:{type:'mcpToolCall',tool:'web_search',result:{
+    structuredContent,content:[{type:'text',text:JSON.stringify(structuredContent)}],
+  }}}
+  const next = {text:'下一条\u2029通知'}
+  const bytes = Buffer.from(JSON.stringify({method:'item/completed',params})+'\r\n'+JSON.stringify({method:'next',params:next})+'\n')
+  const cut = bytes.indexOf(Buffer.from('\u2028'))+1
+  const seen: unknown[] = []
+  const client = await BgsClient.connect({command,cwd:'/private/tmp',env:env('ok'),
+    onNotification:(method,value)=>{seen.push([method,value])}})
+  try {
+    await client.request('fixture/replay-stdout',{chunks:[bytes.subarray(0,cut),bytes.subarray(cut)].map(b=>b.toString('base64'))})
+    await client.drainNotifications()
+    expect(seen).toEqual([['item/completed',params],['next',next]])
+  } finally {await client.close()}
+})
+
+for (const frame of ['{bad json}\n','[]\n','\n','{"method":"unfinished-at-eof"}']) {
+  test('rejects malformed or unterminated stdout frame '+JSON.stringify(frame), async () => {
+    const seen: string[] = []
+    const client = await BgsClient.connect({command,cwd:'/private/tmp',env:env('ok'),
+      onNotification:method=>{seen.push(method)}})
+    try {
+      const end = !frame.endsWith('\n')
+      const output = end ? frame : frame+'{"method":"after-invalid"}\n'
+      const request = client.request('fixture/replay-stdout',{chunks:[Buffer.from(output).toString('base64')],end})
+      await expect(request).rejects.toMatchObject({bgsErrorInfo:{phase:'protocol'}})
+      expect(seen).toEqual([])
+    } finally {await client.close()}
+  })
+}
+
 function env(mode: string): Record<string, string> {
   return { PATH: process.env.PATH || '', HOME: process.env.HOME || '/tmp', BGS_HOME: '/private/tmp/bgs-client-diagnostics-home',
     BGS_CLIENT_DIAGNOSTICS_MODE: mode }

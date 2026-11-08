@@ -402,8 +402,8 @@ async function generateImage(args, capabilities, signal) {
 
 
 /** A viewing surface only: keep the generated PNG and its facts unchanged. */
-async function transparencyPreview(result) {
-  if (result.isOpaque === true) return undefined
+async function imageViewingPreview(result, purpose) {
+  if (result.isOpaque === true && purpose !== 'reference') return undefined
   if (!process.env.BEEGAME_SHARP_MODULE) throw Error('Host image decoder is unavailable')
   const image = (await import(process.env.BEEGAME_SHARP_MODULE)).default
   const output = await assetDestination(result.path, false)
@@ -411,7 +411,8 @@ async function transparencyPreview(result) {
   if (!bytes) throw Error('Saved image is missing before preview rendering')
   const source = image(bytes, {limitInputPixels:64*1024*1024})
   const {hasAlpha} = await source.metadata()
-  if (!hasAlpha) return undefined
+  const transparent = hasAlpha && result.isOpaque !== true
+  if (!transparent && purpose !== 'reference') return undefined
   // Bound only the automatic viewing copy; source bytes and facts stay intact.
   const {data:thumbnail,info:{width,height}} = await source
     .resize({width:512,height:512,fit:'inside',withoutEnlargement:true}).png().toBuffer({resolveWithObject:true})
@@ -420,13 +421,15 @@ async function transparencyPreview(result) {
     const color = (Math.floor(x/16)+Math.floor(y/16))%2 ? 220 : 250
     tile.fill(color,(y*tw+x)*3,(y*tw+x+1)*3)
   }
-  const preview = image({create:{width,height,channels:3,background:'#ffffff'}})
-    .composite([{input:tile,raw:{width:tw,height:th,channels:3},tile:true},{input:thumbnail}])
+  const preview = transparent
+    ? image({create:{width,height,channels:3,background:'#ffffff'}})
+        .composite([{input:tile,raw:{width:tw,height:th,channels:3},tile:true},{input:thumbnail}])
+    : image(thumbnail)
   const png = await preview.clone().png().toBuffer()
   const webp = await preview.webp({lossless:true}).toBuffer()
   return webp.length < png.length
-    ? {bytes:webp,mimeType:'image/webp'}
-    : {bytes:png,mimeType:'image/png'}
+    ? {bytes:webp,mimeType:'image/webp',transparent}
+    : {bytes:png,mimeType:'image/png',transparent}
 }
 
 async function runImageMcp() {
@@ -439,7 +442,7 @@ async function runImageMcp() {
   const server = new Server({name:'beegame-images',version:'1'}, {capabilities:{tools:{}}})
   server.setRequestHandler(ListToolsRequestSchema, async () => ({tools:capabilities.imageEndpoint ? [{
     name:'generate_image',
-    description:TOOL_CONFIG.referenceOnly ? 'Generate an optional design reference with the configured image service and system imagegen Skill. Set request.purpose=reference and save a new file under assets/reference/. Existing availability, pricing, prompt checks and recovery apply; this does not create runtime resources.' : 'Generate or edit project PNG artwork, including character reference sheets, per-character action pose sheets, game-element atlases, UI atlases and backgrounds, through the configured image service independently of the chat model. Supports a project reference image and transparent-background requests; pose consistency, frame geometry and playback need inspection and runtime preparation. assets.mjs cost reports the current configured image model and request options. Uses the existing availability, pricing, source, reference-image and recovery contract. Save to a new assets/ outputPath. Reuse requestId only to recover the unchanged original request; no automatic paid retry. Returns actual saved-file facts, including decoded hasAlpha/isOpaque when available, and, for nonopaque images, one source-scale checkerboard viewing preview in the smaller lossless encoding. The source PNG stays unchanged; this does not register assets or verify appearance.',
+    description:TOOL_CONFIG.referenceOnly ? 'Generate an optional design reference with the configured image service and system imagegen Skill. Set request.purpose=reference and save a new file under assets/reference/. Existing availability, pricing, prompt checks and recovery apply; this does not create runtime resources. Returns saved-file facts and a bounded viewing preview.' : 'Generate or edit project PNG artwork, including character reference sheets, per-character action pose sheets, game-element atlases, UI atlases and backgrounds, through the configured image service independently of the chat model. Supports a project reference image and transparent-background requests; pose consistency, frame geometry and playback need inspection and runtime preparation. assets.mjs cost reports the current configured image model and request options. Uses the existing availability, pricing, source, reference-image and recovery contract. Save to a new assets/ outputPath. Reuse requestId only to recover the unchanged original request; no automatic paid retry. Returns actual saved-file facts, including decoded hasAlpha/isOpaque when available, and one bounded viewing preview for reference or nonopaque images in the smaller lossless encoding. Transparent previews use a checkerboard. The source PNG stays unchanged; this does not register assets or verify appearance.',
     inputSchema:{type:'object',properties:{
       request:{type:'object',properties:{
         requestId:{type:'string'},purpose:{type:'string',enum:TOOL_CONFIG.referenceOnly?['reference']:['reference','experiment','production']},
@@ -478,10 +481,18 @@ async function runImageMcp() {
       // A preview failure follows a saved, potentially paid result. Preserve
       // that result and its recovery identity rather than failing generation.
       try {
-        const preview=await transparencyPreview(result)
-        if (preview) content.push(
-          {type:'text',text:'Transparency viewing thumbnail on a checkerboard (longest edge at most 512px). The saved source PNG remains full size and transparent; this thumbnail is not a production asset.'},
-          {type:'image',mimeType:preview.mimeType,data:preview.bytes.toString('base64')})
+        const preview=await imageViewingPreview(result, args.request.purpose)
+        if (preview) {
+          content[0].text=JSON.stringify({...result,requestFile,
+            note:'Use the attached viewing preview for overall composition and transparency. The saved source path and dimensions support any inspection that needs finer detail. '+(args.request.purpose==='production'
+              ? 'Registration can reuse this saved result with acquisition:"assets/result.json"; declare its actual use.'
+              : 'Reference and experiment images do not fulfill runtime resource requirements.')})
+          content.push(
+            {type:'text',text:preview.transparent
+              ? 'Transparency viewing thumbnail on a checkerboard (longest edge at most 512px). The saved source PNG remains full size and transparent; this thumbnail is not a production asset.'
+              : 'Reference viewing thumbnail (longest edge at most 512px). The saved source PNG and its dimensions remain unchanged; this thumbnail is not a production asset.'},
+            {type:'image',mimeType:preview.mimeType,data:preview.bytes.toString('base64')})
+        }
       } catch (error) {
         content.push({type:'text',text:'Image saved; viewing preview unavailable: '+(error instanceof Error?error.message:String(error))})
       }

@@ -1,4 +1,3 @@
-import type { ProductionAssignment } from './production-workflow'
 import { produceResources } from '../resource-production'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { createHash } from 'node:crypto'
@@ -307,6 +306,7 @@ for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' 
   const stages:string[]=[]
   let providerSubmissions=0, waiting=false
   const requests:string[]=[]
+  const discoverySummary='Compare motion cues at the same tempo; timing remains open.'
   const f=await fixture('normal',false,undefined,()=>({
     instruction:'Simulated image service',close:async()=>{},fetch:async(request:Request)=>{
       if(request.method==='GET')return Response.json({available:true})
@@ -318,24 +318,55 @@ for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' 
         new Response(new Uint8Array([137,80,78,71]),{headers:{'Content-Type':'image/png'}})
     }
   }),0,{},undefined,true,async(root,input,systemContext)=>{
-    const {assignment}=await input.workflow!({action:'status'}) as {assignment:ProductionAssignment}
-    const stage=assignment.stage
+    const stage=(await f.store.read('goal-project','owner'))!.agentTurns!.at(-1)!.production!.stage
     stages.push(stage)
     const prompt=systemContext+"\n"+JSON.stringify(input.prompt)
-    const chosen='assets/reference/selected/opening.html'
+    const chosen='assets/reference/selected/opening.svg'
     const alternate='assets/reference/alternative.html'
     const write=async(path:string,content:string)=>{
       await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),content)
     }
     if(stage==='discovery') {
-      await write('docs/ResearchBrief.md','Observed input sequence from the supplied study.')
-      const findings={status:'ready',summary:'Sources retained',sections:[],files:['docs/ResearchBrief.md']}
-      await expect(input.finalOutput!.accept(findings)).rejects.toThrow('traceable')
-      await write('docs/research/study.svg','<svg/>')
-      await write('docs/ResearchBrief.md','Observed input sequence from docs/research/study.svg. Inference: use motion to reveal input.')
-      await input.finalOutput!.accept({...findings,files:[...findings.files,'docs/research/study.svg']})
+      expect(prompt).toContain('Once the evidence supports a meaningful comparison, return ready')
+      expect(prompt).not.toMatch(/Managed Vite Preview|native scene, UI and resource sources|localStorage\/sessionStorage|after cleanup|Use BgsWorkflow for status/)
+      expect(prompt).toContain('confirmed platform')  // current project constraint still applies
+      expect(prompt).toContain('brief, sources and research images needed by its consumer')
+      expect(prompt).toContain('Creative Direction develops the candidate treatments')
+      expect(prompt).not.toContain('Summarize the choice the evidence supports')
+      const brief='docs/ResearchBrief.md', reference='docs/research/study.svg'
+      const observation='Observed input sequence from '+reference+'. Inference: use motion to reveal input.'
+      if (!input.nativeRecovery) {
+        await write(reference,'<svg/>')
+        if(creationMode==='creative') await write(brief,observation)
+        waiting=true
+        await new Promise<void>(done=>input.signal.addEventListener('abort',()=>done(),{once:true}))
+        return
+      }
+      expect(input.prompt).toEqual([])
+      expect(systemContext).toContain(creationMode==='creative' ? 'Continue from the saved draft at '+brief : 'observations and reference material already retained')
+      expect(await readFile(join(root,reference),'utf8')).toBe('<svg/>')
+      if(creationMode==='creative') expect(await readFile(join(root,brief),'utf8')).toBe(observation)
+      const findings={status:'ready',summary:discoverySummary,sections:[],files:[brief]}
+      if(creationMode==='blueprint') {
+        await write(brief,'Observed input sequence from the supplied study.')
+        await expect(input.finalOutput!.accept(findings)).rejects.toThrow('traceable')
+        await write(brief,observation)
+      }
+      await input.finalOutput!.accept({...findings,files:[brief,reference]})
     } else if(stage==='direction') {
-      if(!input.nativeRecovery)expect(prompt).toContain('Observed input sequence')
+      expect(prompt).toContain('develop candidate expressions and their visual studies')
+      expect(prompt).toContain('where its result could change the direction')
+      expect(prompt).toContain('outstanding production or implementation work')
+      expect(prompt).not.toMatch(/Managed Vite Preview|native scene, UI and resource sources|localStorage\/sessionStorage/)
+      if(!input.nativeRecovery) {
+        // This is what the direction model receives in the new task, not what the store retained.
+        const raw=typeof input.prompt==='string' ? input.prompt : input.prompt.flatMap(item=>item.type==='text' ? [item.text] : []).join('\n')
+        const payload=raw.split('Saved creative input (source data):\n')[1]
+        expect(payload).toBeDefined()
+        expect(JSON.parse(payload!.split('\n')[0])).toMatchObject({summary:discoverySummary,
+          text:'Observed input sequence from docs/research/study.svg. Inference: use motion to reveal input.',
+          files:['docs/ResearchBrief.md','docs/research/study.svg']})
+      }
       if(creationMode==='creative') {
         const doc=input.nativeRecovery?'recovered-request.json':'initial-request.json'
         await write(doc,JSON.stringify({purpose:'reference',prompt:'Chosen direction study'}))
@@ -352,7 +383,7 @@ for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' 
         expect(requests[0]).toBe(requests[1])
         expect(providerSubmissions).toBe(1)
       }
-      await write(chosen,'<canvas></canvas>');await write(alternate,'<button/>')
+      await write(chosen,'<svg xmlns="http://www.w3.org/2000/svg"><circle r="8"/></svg>');await write(alternate,'<button/>')
       await write('docs/VisualContract.md','Selected motion begins with a visible response.')
       const result={status:'ready',summary:'Selected motion',sections:[],files:['docs/VisualContract.md',chosen]}
       await expect(input.finalOutput!.accept({...result,files:[...result.files,alternate]})).rejects.toThrow('only the adopted direction')
@@ -366,6 +397,7 @@ for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' 
       expect(prompt).toContain(chosen)
       expect(prompt).not.toContain(alternate)
       expect(prompt).not.toContain('docs/research/study.svg')
+      expect(prompt).not.toContain(discoverySummary)
       if(stage==='design') {
         await input.finalOutput!.writeDocument!.authorize()
         await write('docs/GDD.md','# Rules\n## Play\nRespond to input.')
@@ -394,18 +426,20 @@ for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' 
   Object.assign(f.body.brief,{creation_mode:creationMode,build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    {
+    for(const pausedStage of ['discovery','direction']) {
       await f.wait(r=>waiting||Boolean(r.agentTurns?.at(-1)?.error))
+      expect(stages.at(-1)).toBe(pausedStage)
       expect(waiting,(await f.store.read('goal-project','owner'))?.blockedReason).toBe(true)
+      waiting=false
       await f.call('/stop','POST')
       let stopped=await f.wait(r=>Boolean(r.paused) && !r.writer)
       await f.call('/resume','POST',{planRevision:stopped.planRevision})
       stopped=(await f.store.read('goal-project','owner'))!
-      const result=creationMode==='blueprint' ? await f.call('/agent/continue-production','POST',{expectedVersion:stopped.version,afterAttemptId:stopped.agentTurns!.at(-1)!.attemptId}) : await f.call('/agent/messages','POST',{requestKey:'resume-direction',runId:stopped.id,chatSessionId:stopped.chatSessionId,expectedVersion:stopped.version,requirementsRevision:stopped.requirements.revision,intent:'continue',continuationOf:stopped.agentTurns!.at(-1)!.attemptId,text:''})
+      const result=pausedStage==='direction' && creationMode==='blueprint' ? await f.call('/agent/continue-production','POST',{expectedVersion:stopped.version,afterAttemptId:stopped.agentTurns!.at(-1)!.attemptId}) : await f.call('/agent/messages','POST',{requestKey:'resume-'+pausedStage,runId:stopped.id,chatSessionId:stopped.chatSessionId,expectedVersion:stopped.version,requirementsRevision:stopped.requirements.revision,intent:'continue',continuationOf:stopped.agentTurns!.at(-1)!.attemptId,text:''})
       expect(result.status,JSON.stringify([await result.clone().text(),stopped.agentTurns!.at(-1)?.error])).toBe(202)
     }
     const run=await f.wait(r=>r.status==='completed'||Boolean(r.agentTurns?.at(-1)?.error))
-    expect(stages,run.blockedReason).toEqual(['discovery','direction',...(creationMode==='creative'?['direction']:[]),'design','resources','implementation','verification'])
+    expect(stages,run.blockedReason).toEqual(['discovery','discovery','direction',...(creationMode==='creative'?['direction']:[]),'design','resources','implementation','verification'])
     expect(run.agentTurns!.find(t=>t.production?.stage==='design')!.designReviews).toHaveLength(1)
     expect(run.status,run.blockedReason).toBe('completed')
   }finally{await f.close()}

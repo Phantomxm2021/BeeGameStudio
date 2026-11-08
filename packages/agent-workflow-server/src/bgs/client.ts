@@ -1,5 +1,4 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { statSync } from 'node:fs'
 import { basename } from 'node:path'
@@ -92,13 +91,27 @@ export class BgsClient {
     // stderr can contain upstream response bodies. Consume it without publishing
     // credentials, prompts or arbitrary provider errors to the product logs.
     this.child.stderr.resume()
-    const lines = createInterface({ input: this.child.stdout, crlfDelay: Infinity })
-    lines.on('line', line => {
-      try { this.receive(JSON.parse(line)) }
-      catch {
-        this.fail(new BgsClientError('BGS returned an invalid protocol message', this.diagnostic('protocol')))
-        void this.close()
-      }
+    // The native writer appends LF to each JSON message. U+2028 and U+2029
+    // are valid inside JSON strings, so readline's text delimiters do not apply.
+    let pendingFrame = ''
+    const rejectFrame = () => {
+      this.fail(new BgsClientError('BGS returned an invalid protocol message', this.diagnostic('protocol')))
+      void this.close()
+    }
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      if (this.exitError) return
+      let start = 0
+      try {
+        for (let end = chunk.indexOf('\n'); end !== -1; end = chunk.indexOf('\n', start)) {
+          this.receive(JSON.parse(pendingFrame + chunk.slice(start, end)))
+          pendingFrame = ''
+          start = end + 1
+        }
+        pendingFrame += chunk.slice(start)
+      } catch { rejectFrame() }
+    })
+    child.stdout.on('end', () => {
+      if (pendingFrame && !this.exitError) rejectFrame()
     })
     this.child.on('error', (error: NodeJS.ErrnoException) => {
       const diagnostic = this.diagnostic('spawn', { code: error.code })
@@ -278,7 +291,17 @@ export class BgsClient {
         try {
           if (process.platform === 'win32') this.child.kill(signal)
           else if (this.child.pid) process.kill(-this.child.pid, signal)
-        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (code === 'ESRCH') return
+          // Darwin may expose stdout EOF while the exiting group leader is
+          // still being reaped. Keep the final group cleanup after close.
+          if (process.platform === 'darwin' && code === 'EPERM' && signal === 'SIGTERM' && this.child.stdout.readableEnded) {
+            this.child.kill(signal)
+            return
+          }
+          throw error
+        }
       }
       if (process.platform === 'win32' && this.child.pid && this.child.exitCode === null) {
         await new Promise<void>((resolve, reject) => execFile('taskkill', ['/PID', String(this.child.pid), '/T', '/F'], error => error ? reject(error) : resolve()))

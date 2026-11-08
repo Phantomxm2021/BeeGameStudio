@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline'
+import { setImmediate } from 'node:timers/promises'
 
 const mode = process.env.BGS_CLIENT_DIAGNOSTICS_MODE || 'ok'
 const secret = 'SYNTHETIC_PROVIDER_SECRET_MUST_NOT_ESCAPE'
@@ -15,7 +16,7 @@ function afterInitialize() {
 }
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
-input.on('line', line => {
+input.on('line', async line => {
   let message
   try { message = JSON.parse(line) } catch { return }
   if (message.method === 'initialize') {
@@ -24,5 +25,12 @@ input.on('line', line => {
     return
   }
   if (message.id === undefined || mode === 'timeout') return
+  if (message.method === 'fixture/replay-stdout') {
+    for (const chunk of message.params.chunks) {
+      process.stdout.write(Buffer.from(chunk, 'base64'))
+      await setImmediate()
+    }
+    if (message.params.end) process.exit(0)
+  }
   send({ id: message.id, result: {} })
 })

@@ -405,10 +405,10 @@ nativeTest(`${stage} task loads only selected Skill bodies and references`, asyn
 }
 
 
-nativeTest('custom chat connection calls the configured image MCP before and after cold resume',async()=>{
+for (const opaqueReference of [false,true]) nativeTest('custom chat connection calls the configured image MCP before and after cold resume, opaqueReference='+opaqueReference,async()=>{
   const root=await mkdtemp('/private/tmp/bgs-configured-image-native-'), game=join(root,'game'), privateRoot=join(root,'private')
   await mkdir(game)
-  const png=await sharp({create:{width:40,height:40,channels:4,background:{r:20,g:30,b:40,alpha:1/255}}}).png().toBuffer()
+  const png=await sharp({create:{width:40,height:40,channels:opaqueReference?3:4,background:{r:20,g:30,b:40,alpha:opaqueReference?1:1/255}}}).png().toBuffer()
   const images:any[]=[],parents:any[]=[],reviews:any[]=[]
   let round=0,step=0
   const imageServer=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
@@ -433,7 +433,7 @@ nativeTest('custom chat connection calls the configured image MCP before and aft
       expect(body.tools.some((t:any)=>t.type==='namespace'&&t.name==='image_gen')).toBe(false)
       output=step++===0 ? [{id:'image-call-'+round,type:'function_call',call_id:'image-call-'+round,status:'completed',
         name:tool.name,...(namespace?{namespace:namespace.name}:{}),arguments:JSON.stringify({
-          request:{purpose:'experiment',prompt:'Local fixture image'},outputPath:'assets/image-'+round+'.png'})}]
+          request:{purpose:opaqueReference?'reference':'experiment',prompt:'Local fixture image'},outputPath:'assets/image-'+round+'.png'})}]
         : [{id:'image-done-'+round,type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'Fixture complete.',annotations:[]}]}]
     }
     const response={id:'fixture-'+(parents.length+reviews.length),object:'response',created_at:1,model:body.model,status:'completed',
@@ -468,8 +468,9 @@ nativeTest('custom chat connection calls the configured image MCP before and aft
       expect(images).toHaveLength(round+1)
       const input=JSON.stringify(parents.at(-1).input)
       expect(input).toContain('<name>imagegen</name>')
-      expect(input).toContain('Transparency viewing thumbnail on a checkerboard')
-      const view=parents.at(-1).input.filter((item:any)=>item.type==='function_call_output').flatMap((item:any)=>Array.isArray(item.output)?item.output:[]).find((part:any)=>part.type==='input_image')
+      expect(input).toContain(opaqueReference?'Reference viewing thumbnail':'Transparency viewing thumbnail on a checkerboard')
+      expect(input).toContain('Use the attached viewing preview')
+      const view=parents.at(-1).input.filter((item:any)=>item.type==='function_call_output'&&item.call_id==='image-call-'+round).flatMap((item:any)=>Array.isArray(item.output)?item.output:[]).find((part:any)=>part.type==='input_image')
       expect(view.image_url).toMatch(/^data:image\/(png|webp);base64,/)
       const decoded=await sharp(Buffer.from(view.image_url.split(',')[1],'base64')).metadata()
       expect(decoded).toMatchObject({width:40,height:40,hasAlpha:false})

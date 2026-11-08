@@ -4,7 +4,7 @@ import { confirmedResourceLibraryUsage } from '../confirmed-brief-context'
 import { requiredLibraryDeliverySources } from '../asset-contract-audit'
 import { BeeGameAssetManifestError } from '../asset-contracts'
 import type { BeeGamePreviewManager, BeeGamePreviewSnapshot } from '../preview-manager'
-import { messageProductionAssignment, initialProductionAssignment, settledAdvance, creativeStageInput, isContinuousGameAuthor, productionAssignmentPrompt, productionAssignmentBaseInstructions, productionWorkflowToolDescription, selectedProductionVisualSources, DESIGN_DECISION_SCOPE, PRODUCTION_WORKFLOW_GUIDANCE, prepareProductionHandoff, verifyProductionHandoff, productionOutputSchema, parseProductionResult, prepareDesignDocumentHandoff, type ProductionAssignment } from './production-workflow'
+import { messageProductionAssignment, initialProductionAssignment, settledAdvance, creativeStageInput, discoveryRecoveryContext, isContinuousGameAuthor, productionAssignmentPrompt, productionAssignmentBaseInstructions, productionWorkflowToolDescription, selectedProductionVisualSources, DESIGN_DECISION_SCOPE, PRODUCTION_WORKFLOW_GUIDANCE, prepareProductionHandoff, verifyProductionHandoff, productionOutputSchema, parseProductionResult, prepareDesignDocumentHandoff, type ProductionAssignment } from './production-workflow'
 import { z } from 'zod/v4'
 import { readSessionTranscriptFactsFromDisk, type BeeGameAttachment, type BeeGameTurnTools, type BeeGameSessionManager, type StartBeeGameSessionInput, type BeeGameNativeGoalInput, type BeeGameEvent } from '../session-manager'
 import { pauseRun, digest, isInitialSliceTurn, WorkflowError, type Run, type AgentTurn, type AgentMessage, type DesignFileChanges, type ProjectFileChanges } from './state'
@@ -733,6 +733,11 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           const verificationContext=verification ? [DESIGN_DECISION_SCOPE,enginePlatformContext,
             ...(isWebCodeTarget(run.requirements.constraints)?['Managed Preview uses the available game container inside an opaque iframe; native storage may throw. Use BgsWorkflow preview to obtain the current runtime URL.']:[]),
           ].join('\n') : ''
+          const discovery = turn.production?.stage === 'discovery' && !productionChat
+          const direction = turn.production?.stage === 'direction' && !productionChat
+          const professionalContext = verification ? verificationContext : discovery || direction
+            ? [enginePlatformContext, resourceAuthorizationContext, nativeRecovery && (discovery ? discoveryRecoveryContext(run.workspacePath) : productionAssignmentPrompt(run, turn.production!))].filter(Boolean).join('\n')
+            : agentProfessionalContextForRun(run, Boolean(turn.message))
           const evidence={task,...(executionContext ? {executionContext} : {})}
           // Carry the selected document once as source data in the new task,
           // rather than relying on a truncated Shell read to rediscover it.
@@ -810,7 +815,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                 return request.summary
               },
             }} : {}),
-            systemContext:(verification ? verificationContext : agentProfessionalContextForRun(run,Boolean(turn.message)))+(!verification && previousVerification ? '\nPrevious verification result (observations for affected repair, not a new user scope): '+JSON.stringify(previousVerification) : '')+(productionChat && turn.production?.stage==='implementation' ? '\nThe current user message is the assignment boundary. Answer questions directly; carry out authorized implementation and choose its verification in this same turn. Finish with results and remaining work, without restarting earlier production stages. A BGS implementation handoff or delivery submission is not required.' : '')+(turn.production && !productionChat && !['implementation','verification'].includes(turn.production.stage) ? '\n\n'+PRODUCTION_WORKFLOW_GUIDANCE : '')+'\n\n'+guide+'\n\n'+tools.systemContext+
+            systemContext:professionalContext+(!verification && previousVerification ? '\nPrevious verification result (observations for affected repair, not a new user scope): '+JSON.stringify(previousVerification) : '')+(productionChat && turn.production?.stage==='implementation' ? '\nThe current user message is the assignment boundary. Answer questions directly; carry out authorized implementation and choose its verification in this same turn. Finish with results and remaining work, without restarting earlier production stages. A BGS implementation handoff or delivery submission is not required.' : '')+(turn.production && !productionChat && !['implementation','verification'].includes(turn.production.stage) ? '\n\n'+PRODUCTION_WORKFLOW_GUIDANCE : '')+'\n\n'+guide+'\n\n'+tools.systemContext+
               '\n'+tools.turnContext+(nativeRecovery ? confirmedChanges : '')+(!nativeRecovery && !turn.production && turn.message && !assignment && ['message','work','change','continue'].includes(turn.message.intent) ? '\nThis message starts without a native Goal. Answer questions or perform authorized work within the current user assignment. Finish in this turn; no additional implementation handoff is required. Do not expand the assignment.' : '')+'\nBGS current assignment: '+JSON.stringify(evidence)}
         },
       })

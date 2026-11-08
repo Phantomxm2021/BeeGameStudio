@@ -713,7 +713,7 @@ export function createAgentWorkflowApp(
       return createImageGenerationAccess({ userId: value.user.id, projectId: value.projectId,
         workspacePath: value.workspacePath, service: imageGeneration, source: personal.source,
         screenOrientation: value.screenOrientation,
-        reviewPrompt: async (prompt: string) => {
+        reviewPrompt: async (prompt, context) => {
           const credential = sessionAuth?.getCredential?.(value.request)
           const authToken = credential ? await credential.getValidAccessToken() : getRequestAuthToken(value.request)
           const runtimeEnv = await dashboardRepository.getRuntimeEnv(
@@ -722,7 +722,7 @@ export function createAgentWorkflowApp(
             cwd: value.workspacePath, runtimeEnv,
             systemPrompt: IMAGE_PROMPT_REVIEW_INSTRUCTIONS,
             messages: [{ role: 'user', content: imagePromptReviewInput(
-              value.workspacePath, value.confirmedRequirements, prompt, value.requireGdd) }],
+              value.workspacePath, value.confirmedRequirements, prompt, value.requireGdd, context) }],
             querySource: 'beegame_image_prompt_review',
           }, createUsageRecorder({ sessionId: value.sessionId, projectId: value.projectId,
             submit: record => beeGameSessions.recordExternalUsage(value.user.id, record) }), true,

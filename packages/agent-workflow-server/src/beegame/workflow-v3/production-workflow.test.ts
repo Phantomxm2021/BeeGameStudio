@@ -5,7 +5,7 @@ import {mkdtemp,mkdir,writeFile,readFile,rm,realpath,symlink} from 'node:fs/prom
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {createRun,type Run,type AgentTurn} from './state'
-import {DESIGN_DECISION_SCOPE,designDocumentSnapshot,initialProductionAssignment,isContinuousGameAuthor,prepareProductionHandoff,prepareDesignDocumentHandoff,verifyProductionHandoff,productionAssignmentPrompt,productionAssignmentBaseInstructions,productionWorkflowToolDescription,productionAssignmentFacts,nextProductionStage,messageProductionAssignment,selectedProductionVisualSources,productionOutputSchema,parseProductionResult,implementationVerificationHandoff,verificationImplementation,parseImplementationVerification,implementationVerificationOutputSchema} from './production-workflow'
+import {DESIGN_DECISION_SCOPE,designDocumentSnapshot,initialProductionAssignment,isContinuousGameAuthor,prepareProductionHandoff,prepareDesignDocumentHandoff,verifyProductionHandoff,productionAssignmentPrompt,productionAssignmentBaseInstructions,productionWorkflowToolDescription,productionAssignmentFacts,creativeStageInput,nextProductionStage,messageProductionAssignment,selectedProductionVisualSources,productionOutputSchema,parseProductionResult,implementationVerificationHandoff,verificationImplementation,parseImplementationVerification,implementationVerificationOutputSchema} from './production-workflow'
 
 async function fixture() {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-design-coverage-')))
@@ -676,6 +676,52 @@ test('explicit and native implementation handoffs require intact library deliver
   }finally{await f.close()}
 })
 
+
+test('Discovery summary cannot replace a missing or changed source at the Direction handoff',async()=>{
+  const f=await fixture()
+  try {
+    f.run.creation={creativeStages:1,initialDelivery:'complete-game',verification:'isolated',editableContent:false}
+    const discovery={stage:'discovery' as const,originRequestKey:f.run.requestKey}
+    const brief='docs/ResearchBrief.md', reference='docs/study.svg'
+    const files=[brief,reference]
+    await writeFile(join(f.root,brief),'Observation from '+reference)
+    const submission={action:'advance',summary:'A plausible conclusion alone is insufficient.',sections:[],files}
+    const turn={...f.turn,production:discovery}
+    expect(()=>prepareProductionHandoff(f.run,turn,submission)).toThrow(/ENOENT/)
+    await writeFile(join(f.root,reference),'<svg/>')
+    const handoff=prepareProductionHandoff(f.run,turn,submission)
+    f.run.agentTurns=[{...turn,status:'ended',quiescedAt:new Date().toISOString(),productionHandoff:handoff}]
+    for(const path of files) {
+      const original=await readFile(join(f.root,path))
+      await writeFile(join(f.root,path),'Changed after ready')
+      expect(()=>creativeStageInput(f.run,handoff.next!)).toThrow('source changed')
+      await writeFile(join(f.root,path),original)
+    }
+  }finally{await f.close()}
+})
+
+test('Direction can hand off a static study with production work left for its consumers',async()=>{
+  const f=await fixture()
+  try {
+    f.run.creation={creativeStages:1,initialDelivery:'complete-game',verification:'isolated',editableContent:false}
+    const contract='docs/VisualContract.md', study='assets/reference/selected/study.svg'
+    await mkdir(join(f.root,'assets/reference/selected'),{recursive:true})
+    await writeFile(join(f.root,contract),'Adopt the open play lane. Production separates the basket; implementation binds movement.')
+    const turn={...f.turn,production:{stage:'direction' as const,originRequestKey:f.run.requestKey}}
+    const request={action:'advance',summary:'The selected composition resolves the choice.',sections:[],files:[contract,study]}
+    expect(()=>prepareProductionHandoff(f.run,turn,request)).toThrow(/ENOENT/)
+    await writeFile(join(f.root,study),'<svg xmlns="http://www.w3.org/2000/svg"><circle r="8"/></svg>')
+    const handoff=prepareProductionHandoff(f.run,turn,request)
+    expect(handoff.next?.stage).toBe('design')
+    expect(handoff.sources.map(s=>s.path)).toEqual([contract,study])
+    for(const path of request.files) {
+      const original=await readFile(join(f.root,path))
+      await writeFile(join(f.root,path),'Changed after ready')
+      expect(()=>verifyProductionHandoff(f.root,handoff)).toThrow('source changed')
+      await writeFile(join(f.root,path),original)
+    }
+  }finally{await f.close()}
+})
 
 test('workflow discovery describes only the current assignment without changing its handoff contract',()=>{
   const task={originRequestKey:'fixture'}

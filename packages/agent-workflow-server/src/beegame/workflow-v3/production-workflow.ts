@@ -1,6 +1,6 @@
 import { ProductionBlockedError } from '../production-blocked'
 import { createHash } from 'node:crypto'
-import { constants, openSync, closeSync, fstatSync, readFileSync, realpathSync } from 'node:fs'
+import { constants, lstatSync, openSync, closeSync, fstatSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { readDesignSections } from '../design-source-reading'
@@ -30,6 +30,22 @@ export type ProductionHandoff = {
   sources: Array<{ path: string; sha256: string }>
 }
 const researchPath = 'docs/ResearchBrief.md'
+const discoveryAssignment = [
+  'Investigate an unresolved question that could change the creative direction. Deliver the observed evidence and its limits to Creative Direction + Taste Engine, which develops and compares candidate expressions and makes their visual studies.',
+  'Start from the confirmed choices, constraints and approved references. Reuse relevant evidence already available, and retain precise source locations for outside observations. In docs/ResearchBrief.md connect the pending question to traceable sources, what you actually observed, your inference and its limits. Retain the local material the direction author needs to inspect.',
+  'Once the evidence supports a meaningful comparison, return ready with sections:[] and the brief, sources and research images needed by its consumer. Use the handoff summary for the research conclusion and remaining uncertainty. Creative Direction develops the candidate treatments and their visual presentation from these inputs.',
+].join(' ')
+
+export function discoveryRecoveryContext(workspace: string) {
+  // The draft is a pointer for the author, not a validated handoff. Its text and
+  // reference files may still be incomplete after interruption.
+  const draft = lstatSync(resolve(workspace, researchPath), {throwIfNoEntry:false})
+  const resume = draft?.isFile()
+    ? 'Continue from the saved draft at ' + researchPath + ' and the references it cites.'
+    : 'Continue from the observations and reference material already retained in this session and workspace.'
+  return discoveryAssignment + '\n' + resume + ' Reuse what already answers the pending choice; investigate only a gap that would change the comparison.'
+}
+
 const directionPath = 'docs/VisualContract.md'
 const selectedMedia = /\.(?:svg|png|jpe?g|webp|gif|pdf|html|mp4|webm)$/i
 const visualSourcePattern = /\.(svg|png|jpe?g|webp|gif|pdf)$/i
@@ -68,7 +84,7 @@ export function isContinuousGameAuthor(run: Run, task: ProductionAssignment) {
 }
 // Current work uses the existing turn and application context, retained by
 // native history and compaction. Host evidence carries small assignment facts.
-export const PRODUCTION_WORKFLOW_GUIDANCE = 'This preparation task has no native Goal. Return the final result required by the current stage; no separate advance call is needed. BGS checks the saved sources and continues only after cleanup. Missing inputs required by this assignment remain blockers; document completion does not certify game quality.'
+export const PRODUCTION_WORKFLOW_GUIDANCE = 'This preparation task has no native Goal. Return the final result required by the current stage; no separate advance call is needed. BGS checks the saved sources before advancing. Missing inputs required by this assignment remain blockers; document completion does not certify game quality.'
 
 /** Small host-owned navigation facts retained by the existing runtime context.
  * Source pointers are not source content or evidence of Skill application. */
@@ -117,7 +133,7 @@ export function productionWorkflowToolDescription(task?: ProductionAssignment, s
     case 'direction':
       return preview + ' Submit only the adopted direction through the final result.'
     case 'discovery':
-      return 'Inspect current status. Submit the stage files through the final ready result.'
+      return 'Submit the research brief and its references through the final result.'
     case 'verification':
       return preview + ' This assignment is read-only verification. Return observations through its final JSON contract.'
     case 'design':
@@ -165,8 +181,8 @@ export function productionAssignmentPrompt(run: Run, task: ProductionAssignment)
   const implementationFinish = run.creation?.verification === 'isolated' ? '' : 'Judge remaining work against those requirements and repair observed deviations. Finish this native turn with the result, checks actually performed and any remaining defects, unverified behavior or external blockers.'
   if (run.creation?.creativeStages && task.stage !== 'visual') {
     const work = {
-      discovery: 'Use the confirmed gameplay choice, configuration and supplied references to identify unresolved design questions. Choose real sources that illuminate the unresolved player experience, including composition, movement or sound when these decisions are open. Distinguish a suggested way of investigating a risk from a required player outcome. Save docs/ResearchBrief.md with traceable source locations (including clips/timestamps when relevant), actual observations, separately labelled inferences, applicable principles, limitations and risks. Include saved local reference materials in files. Reuse complete approved materials. If necessary evidence cannot be obtained, disclose the gap. Return ready with sections:[] and the actual files; no GDD is due.',
-      direction: 'Read the research brief and inspect its referenced material. Compare different ways the same representative passage could unfold for the player, keeping confirmed rules and design choices fixed, not unresolved staging or interface behavior. Compare the observable candidates for distinctiveness, coherence, gameplay fit, craft and feasibility. Reuse approved designs. Use a game-view study for composition and a sequence, audio or small prototype when motion or timing determines the choice. Respect the existing budget; if no direction is supportable within it, retain exploration and return blocked. Keep exploratory alternatives outside assets/reference/selected/; save the adopted study and its dependencies together under assets/reference/selected/. Save docs/VisualContract.md describing only the adopted concept, spatial/UI, movement, sound, supporting sources, tradeoffs and observable player outcomes. Return files containing this contract and only the chosen study and its necessary media, with sections:[]. Do not submit alternatives. No GDD or runtime assets are due.',
+      discovery: discoveryAssignment,
+      direction: 'Use the research summary, brief and referenced material to develop candidate expressions and their visual studies. Compare different ways the same representative passage could unfold for the player, keeping confirmed rules and design choices fixed, not unresolved staging or interface behavior. Compare the observable candidates for distinctiveness, coherence, gameplay fit, craft and feasibility. Reuse approved designs. Use a game-view study for composition; use a sequence, audio or small prototype where its result could change the direction or an important composition, UI or transition decision. When those decisions are supportable, hand off the existing adopted study and record the decisions and outstanding production or implementation work in docs/VisualContract.md. Respect the existing budget; if no direction is supportable within it, retain exploration and return blocked. Keep exploratory alternatives outside assets/reference/selected/; save the adopted study and its dependencies together under assets/reference/selected/. Save docs/VisualContract.md describing only the adopted concept, spatial/UI, movement, sound, supporting sources, tradeoffs and observable player outcomes. Return files containing this contract and only the chosen study and its necessary media, with sections:[]. Do not submit alternatives. GDD defines the rules next; resource production makes the independent parts, and implementation integrates and verifies their behavior.',
       design: 'Finalize docs/GDD.md from the confirmed gameplay and the adopted Visual Contract. Define the needed rules, player states, transitions, and feedback. Adopt player outcomes; a research suggestion about test equipment or procedure is not a delivery requirement unless explicitly requested. Refer to the selected treatment rather than deciding it again. Submit the saved GDD for the existing independent rule review.',
       resources: 'Produce usable runtime art, animation and audio for the representative passage from the reviewed GDD and selected direction, respecting the confirmed resource configuration. Register and hand off the files the runtime will consume, their required companions and the relevant GDD headings. Retain production sources separately; alternative exports are only deliverables when they serve another real consumer. Identify outstanding needs. Design studies are references, not produced runtime assets.',
       implementation: 'Integrate the delivered resources and reviewed rules into a runnable game. Develop the representative passage first, adjust timing, composition and feedback in the first preview, then complete the agreed scope. Submit the actual runtime entry and reusable observations for independent verification.',
@@ -332,7 +348,7 @@ export function creativeStageInput(run:Run, task:ProductionAssignment) {
     verifyProductionHandoff(run.workspacePath,resources)
   }
   const record=readTextHandoffSource(run.workspacePath,research?researchPath:directionPath)
-  return 'Saved creative input (source data):\n'+JSON.stringify({...record,files:handoff.sources.map(s=>s.path)})
+  return 'Saved creative input (source data):\n'+JSON.stringify({...(research ? {summary:handoff.request.summary} : {}),...record,files:handoff.sources.map(s=>s.path)})
 }
 
 export function designDocumentSnapshot(workspace: string) {

@@ -11,7 +11,7 @@ import { ImageConfigurationError } from './runtime-config'
 import { ImageReferenceError, readProjectReferenceImage, renderUiReferenceLayout } from './reference-image'
 import { fixedImageChargeCreditsMicro } from './pricing'
 import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
-import type { ImagePromptReview } from './prompt-review'
+import type { ImagePromptReview, ImagePromptReviewContext } from './prompt-review'
 
 const generation = z.object({
   requestId: z.string().trim().min(1).max(200),
@@ -71,7 +71,7 @@ export function createImageGenerationAccess(input: {
   source?: ImageSource
   loadConfig: () => Promise<ImageGenerationConfig>
   service: ImageGenerationService
-  reviewPrompt?: (prompt: string) => Promise<ImagePromptReview>
+  reviewPrompt?: (prompt: string, context: ImagePromptReviewContext) => Promise<ImagePromptReview>
 }) {
   let closed = false
   const handle = async (request: Request) => {
@@ -151,7 +151,10 @@ export function createImageGenerationAccess(input: {
         ...(input.reviewPrompt && parsed.data.purpose === 'reference' ? { reviewPrompt: async () => {
           stage = 'prompt-review'
           request.signal.throwIfAborted()
-          const review = await input.reviewPrompt!(imageRequest.prompt)
+          const review = await input.reviewPrompt!(imageRequest.prompt, {
+            purpose: 'reference',
+            referenceImage: referenceImage ? { sha256: referenceImage.sha256, mimeType: referenceImage.mimeType } : null,
+          })
           recordOk = record(normalizedRequest, config, { event: 'prompt-checked', issues: review.issues }) && recordOk
           if (review.issues.length)
             throw new ImageRequestValidationError('Resolve the image prompt before generation: ' + review.issues.join('; '), 'image-prompt-conflict')
