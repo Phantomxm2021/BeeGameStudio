@@ -7,8 +7,8 @@ BGS 基于选定的官方 Codex 版本。原生执行、Goal 计数、历史恢�
 - 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/codex-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.167.0`：上游命名的维护分支，仅保留 CLI 展示／图标、Prompt 身份文案与对应测试预期、禁止官方二进制覆盖源码包的打包保护及 workspace 锁文件版本修正；三个非品牌行为补丁已撤除。
-- `bgs/0.167.0`：由维护分支加受限配置根／文档转换生成；保留官方内部名称及协议。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
+- `bgs/source-0.167.1`：上游命名的维护分支，仅保留 CLI 展示／图标、Prompt 身份文案与对应测试预期、禁止官方二进制覆盖源码包的打包保护及 workspace 锁文件版本修正；三个非品牌行为补丁已撤除。
+- `bgs/0.167.1`：由维护分支加受限配置根／文档转换生成；保留官方内部名称及协议。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
 - 受限转换在 `scripts/brand-bgs.py`：默认只报告，`--apply` 才写入；只处理受 Git 管理的源码，不重命名文件／类型／协议，不处理宿主或用户运行数据。原生配置根使用 BGS_HOME／.bgs，项目配置与其沙箱保护一致使用 .bgs，系统配置和管理域属于 BGS；其他内部实现沿用官方。
 
 后续更新在维护分支合并选定的官方版本，先审阅相对官方的全部差异，再生成发行分支并核对。不得自动延续非品牌行为补丁，也不得将自写测试断言作为偏离官方的依据；机械可复现不等于语义正确或外部兼容性已验证。
@@ -87,7 +87,7 @@ bun run bgs:build
 bun run bgs:check
 bun run bgs:verify
 python3 scripts/test_brand_bgs.py
-python3 scripts/verify-bgs-source.py bgs/source-0.167.0
+python3 scripts/verify-bgs-source.py bgs/source-0.167.1
 bun run typecheck
 bun test scripts/migrate-bgs-home.test.ts
 BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
@@ -96,6 +96,18 @@ BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
 首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/codex-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
 
 产物是 `dist/bgs-runtime/bgs`、匹配的 `codex-code-mode-host`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+
+## 0.167.1 官方对齐与本机切换（2026-11-11）
+
+- 官方基线为 `rust-v0.167.1`（`0a94398fa6`）；实际官方增量共 11 个文件。维护源码合并提交 `7c4907520a`，BGS 发行提交 `92db1eae33`；相对旧 BGS 只多出官方增量及 171 个工作区包的锁版本同步，外部依赖不变。没有引入 alpha 分支或新的原生行为补丁。
+- 现有 BGS 展示／Prompt 身份、BGS_HOME／.bgs／SQLite 与 TUI 变量隔离、系统配置域及源码包更新保护保留；品牌脚本未修改。官方内部名称、协议字段、第三方插件格式与功能默认值保留，未主动启用 `incremental_tools_legacy`。
+- 9,819 个文件复现零差异，323 份协议及配置 schema 忽略说明后与官方结构一致；本次新增的执行／工具目录逻辑及 Goal、历史上下文和模型 Skill 策略代码逐字节与选定官方版本一致。
+- 22 项现有 BGS 原生回归首轮 21 通过，1 项在未改动宿主的最终进程清理处报 EPERM；该项用保留的旧包和新候选包分别单项复测均通过。保留原始失败，不将其当成已修复或整组首次全绿。通过范围包括配置隔离、Prompt／模型目录、Skill／插件、压缩恢复、Goal 用量与暂停、0.167.0 合成会话由 0.167.1 同 thread 恢复。
+- 官方增量工具测试实际执行为 8 通过、3 项最终快照指纹不符；在同一环境以官方标签源码及原断言重新构建运行，也得到同样结果，两个生成快照与 BGS 输出逐字节一致。未更改官方快照或运行时迎合测试。官方基础指令另 4 项实际通过。初次筛选未命中及网络标记导致跳过的记录不计作通过；这些同机快照差异仍是验证边界，不据此宣称官方执行算法有缺陷。
+- macOS arm64 沿用 dev 构建方式，关闭增量与 debug info，锁定依赖编译。候选包及安装后 CLI 冒烟通过：默认／显式 BGS_HOME、帮助、补全、离线插件安装／卸载和安全更新入口。测试只用临时目录、合成会话和 localhost 响应，没有真实模型调用、真实项目任务或数据迁移。
+- 2026-11-11 14:07:52（Asia/Shanghai）在实际 idle、无原生任务及待结算用量时原子替换运行包；四服务及父进程、原预览和子进程的 PID／启动时间均保持不变，未重启服务。旧包单独保留供回退。源码维护／发行分支已发布至现有 Fork，主仓库用独立升级提交固定发行引用；其他未提交改动不纳入。
+
+审计、失败原始记录、官方对照、候选包和回退包位于 `claude-code-main/backups/bgs-upgrade-0.167.1-20261111/`。本轮不修改宿主业务代码或已有无关改动；Linux／Windows 构建与真实供应商未验证。
 
 ## 撤除非品牌补丁并恢复官方协议（2026-11-06）
 
@@ -176,7 +188,7 @@ bun scripts/migrate-bgs-home.ts --from /OWNER/.runtime/app/codex --to /OWNER/.ru
 以下 NEW_VERSION 是选定的官方版本：
 
 ```sh
-git -C vendor/bgs switch bgs/source-0.167.0
+git -C vendor/bgs switch bgs/source-0.167.1
 git -C vendor/bgs switch -c bgs/source-NEW_VERSION
 git -C vendor/bgs fetch upstream tag rust-vNEW_VERSION
 git -C vendor/bgs merge --no-ff rust-vNEW_VERSION
