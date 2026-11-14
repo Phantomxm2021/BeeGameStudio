@@ -1,0 +1,13 @@
+# Guidance and progression within the current game
+
+Read for first-time teaching, the initial development of an encounter/round, or a reported navigation or pacing problem. Start from the intended action, the audience's relevant prior knowledge and the scene/state and inputs available. Retain the chosen guidance or variation, its intended effect and any uncertainty with the existing design/scene decision.
+
+Follow the player's view before following the intended solution: what is visible, what appears actionable, what changes after an attempt, and where failure points next. Compare plausible alternatives, including doing nothing or choosing the wrong object. A tester who knows the solution can test reachability but cannot establish discoverability. Keep that human question open without blocking unrelated technical work.
+
+Prefer relationships that reveal the current mechanic: line of sight, contrast with nearby objects, safe opportunities to try, and clear consequences. Explicit instructions, accessible alternatives and necessary reminders are valid; removing text is not automatically better guidance. UI hierarchy/navigation belongs to the UI specialist; appearance to Art; response to Feel; rules to Systems.
+
+When the intended experience calls for progression or variation, develop an encounter or round through changes in information, spatial constraints or the combination of established interactions. Repetition may serve mastery or contemplation. A collection round can change placement or exposure, a platformer the landing/obstacle relationship, a puzzle the available inference, and a strategy game the space in which competing pressures act. Use the game's authored structure; sandbox or multiplayer play need no prescribed route or ending.
+
+When runtime observation is in scope, follow the starting situation and a relevant later/recovery situation through delivered controls. Record the current assumption and what would disprove the intended learning or challenge. Keep screenshots as evidence of available cues, not evidence that a novice understood them. Where actual player evidence is required, use the existing player-observation reference under its authorization/privacy limits.
+
+Source notes: [Nintendo interview](https://www.nintendo.com/en-gb/Iwata-Asks/Iwata-Asks-New-Super-Mario-Bros-Wii/Volume-2/4-Adjusting-the-Map-in-a-Daily-Cycle/4-Adjusting-the-Map-in-a-Daily-Cycle-233027.html); [MCV's third-party account of GMTK's analysis](https://mcvuk.com/business-news/publishing/video-nintendos-level-design-secrets-in-four-steps/). Four phases are an optional analytical pattern, not a Nintendo requirement or a template for every genre. No game content is reproduced here.

@@ -1,0 +1,33 @@
+---
+name: game-art-director-expert
+description: "Develop shared visual language and realize scene/subject appearance through composition, materials, lighting, animation and VFX. Use for art direction or rendering/playback work; interface information and control transitions use UI/UX, playable-space organization uses Scene/spatial design. 中文：共同视觉语言、场景主体表现与动画特效；界面流程归 UI，可玩空间组织归场景与空间设计。"
+---
+
+# Game Art Direction and Realization
+
+Develop shared appearance from the subject, player action and audience, or realize an adopted scene/subject treatment in the selected renderer. Preserve confirmed gameplay and selected designs. A local rendering or playback repair goes directly to its applicable method; it need not reopen art direction.
+
+## Derive the expression
+
+Find how subjects are constructed, occupy space, move, make contact and change. Materials, visual traditions or an appropriate abstract system can supply characteristic relationships. Reuse supplied references; investigate outside sources for a concrete missing basis. Distinguish observed relationships from proposed applications; reference access does not grant asset reuse rights or select a direction.
+
+Translate the useful relationship into dominant forms, joins, quiet space, recognizable edges and material cues. Folded construction might suggest planes and hinged movement; cast construction, mass and settling. Carry it through scale, type and motion rather than apply a style label, palette or decoration to a predetermined layout. Controls need not become literal props. Explain through the assigned artifact.
+
+Carry shared form, type and material relationships through scenes, subjects and interface surfaces. For relationships being built or changed, read [UI/UX](../game-ui-ux-designer/SKILL.md) for interface information, control states and transitions, or [Scene/spatial design](../game-scene-designer/SKILL.md) for playable access, scale, contact and visibility. Compose attention around action and perceptible consequence; reuse existing implementation and methods already read in context. For API mechanics, match the selected engine and version: [Phaser 4](../phaser4-gamedev/SKILL.md) for Phaser 4, [Three.js](../threejs-gamedev/SKILL.md) for Three.js, and corresponding APIs and documentation for Phaser 3 or other engines.
+
+In first scene design, derive environmental activity from the place, materials and mood: choose what changes and its rhythm, extent and relationship to player attention. Retain purposeful stillness. During production, retain selected proportions, spatial relationships and material treatment; distinguish an alternative preference from a defect.
+
+## Realize the expression
+
+For the required scene or subject change, consider what can supply its visible form/detail and motion: static/state images, sequences, geometry, transforms, particles, materials or rigs. When first constructing an action's expression, including adopting supplied, sourced or generated animation, compare the candidate's pose, silhouette and support/contact progression with the current action and intended rhythm before choosing its representation and playback. Retain suitable motion and available source timing as the playback basis; use missing changes to choose intermediate samples, deformation or additional action data. Transforms or timing changes cannot supply missing drawn articulation. For simulation-driven surface locomotion, match the cycle's support progression to executed travel where grounded contact is intended; an in-place sequence alone establishes no unique travel distance. Other motion uses the driver that expresses it, such as action phase or elapsed time; retain deliberate holds or steps. Preserve authored hierarchy, scale, pivots, anchors, depth, transparency and native references. Simulation owns movement and outcomes; animation completion does not establish success. Report unsupported requirements rather than silently drop them.
+
+Bind feedback to the real event subject and intended coordinate space. Keep presentation, simulation and input clocks distinct. On interruption, subject removal or scene change, finish a retained tail on its owning clock or release the owned work and restore only its overrides. Observe the relevant contact, ending and transition at play speed; stills cannot establish playback. Preserve required reduced-motion alternatives. Diagnose the affected relationship and measure before optimizing.
+
+## Detail for the current question
+
+- Style vocabulary: [stylization](../../references/game-art-director-expert/stylization-language.md) or [2D styles and assets](../../references/game-art-director-expert/2d-style-and-assets.md). Read only the relevant comparisons.
+- Composition and appearance: [visual studies](../../references/game-art-director-expert/ui-visual-hierarchy.md), [framing](../../references/game-art-director-expert/camera-framing.md), [color](../../references/game-art-director-expert/color-language-system.md), [shape](../../references/game-art-director-expert/shape-language-framework.md) or [lighting](../../references/game-art-director-expert/lighting-mood-framework.md). Inspect actual pictures where needed; reuse retained observations and disclose unavailable viewing.
+- Surface construction: [material and shading](../../references/game-art-director-expert/material-and-shading.md), with [style-to-rendering cases](../../references/game-art-director-expert/style-rendering-cases.md). Sprite sampling/light/masks use [2D rendering](../../references/game-art-director-expert/2d-rendering-cases.md); alpha, depth, color/output and effect layers use [compositing](../../references/game-art-director-expert/compositing-cases.md).
+- Motion: [implementation and sequence playback](../../references/game-art-director-expert/motion-implementation.md), [deformation cases](../../references/game-art-director-expert/deformation-cases.md) or [skeletal handoff](../../references/game-art-director-expert/skeletal-animation-handoff.md); [character image animation](../../references/game-art-director-expert/ai-sprite-animation.md) only for actual pose/identity production.
+- Effects: [VFX craft and diagnosed cases](../../references/game-art-director-expert/vfx-craft.md). A measured runtime/loading bottleneck uses [cost tradeoffs](../../references/game-art-director-expert/runtime-cost-tradeoffs.md).
+- Production: [visual handoff](../../references/game-art-director-expert/visual-production.md) retains the selected expression; [resource production](../game-content-pipeline-engineer/SKILL.md) derives source parts, compatible deliverables and acquisition from the required appearance and behavior.

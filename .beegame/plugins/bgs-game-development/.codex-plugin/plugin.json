@@ -1,0 +1,6 @@
+{
+  "name": "bgs-game-development",
+  "version": "1.0.50",
+  "description": "Game design, artwork, runtime implementation and playtesting methods. Select the relevant specialist Skills for the current task.",
+  "skills": "./skills/"
+}
