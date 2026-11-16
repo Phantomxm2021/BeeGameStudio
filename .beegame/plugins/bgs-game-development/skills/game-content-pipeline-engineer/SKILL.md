@@ -1,6 +1,6 @@
 ---
 name: game-content-pipeline-engineer
-description: "Choose how required game artwork, audio or 3D models will be produced and prepared for the selected runtime. Use for initial sourcing and production, including acquired/generated artwork and fallback construction, then extraction, spritesheet/atlas packing and import preparation; playback stays with its runtime consumer."
+description: "Choose how required game artwork, audio or 3D models will be produced and prepared for the selected runtime. Use for initial sourcing and production, including acquired and generated artwork, then extraction, spritesheet/atlas packing and import preparation; playback stays with its runtime consumer."
 ---
 
 # Game Content Pipeline Engineer
@@ -9,13 +9,13 @@ Derive usable resources and their production path from the required appearance, 
 
 ## Choose deliverables before requests
 
-Derive the artwork to request from the visible differences established by the GDD and selected visuals, where available. For states that share a form and differ only in how it is shown or driven, request that form once and describe the different playback in the handoff. Request another pose, surface or silhouette only for a specific designed difference that transforming, deforming or shading the shared artwork cannot express.
+Derive the artwork to request from the visible differences established by the GDD and selected visuals, where available. Choose the representation that preserves the intended appearance through the change at play size. A value can select painted states in a sheet or drive a mask over shared artwork. Reuse suitable artwork and request the poses, surfaces or intermediate shapes the chosen playback needs.
 
 Keep parts or regions separately controllable if either can change while the other holds, including when their cues start together but end at different times. They can share a file while retaining that control. Bake together only what stays together through motion, lighting, occlusion and layout. Preserve contact, depth and the area revealed behind moving parts. Group production requests by shared appearance, scale and what the source can deliver. Pack the results according to the consumer's sampling, size and loading needs.
 
 ## Acquire and deliver usable files
 
-Preserve explicit user source choices, suitable supplied/adopted assets and rights. For each remaining visual resource family, search the self-hosted resource library first, then suitable Web sources, then authorized AI generation for the required asset type; programmatic artwork is the final fallback after those sources cannot supply a usable, licensed match. Judge candidates against the selected appearance, required states and runtime compatibility, and stop once a suitable source is found. [Resource selection](../../references/resource-selection.md) covers candidate matching and acquisition evidence; audio follows its existing production choice there. For selected AI image production, the system imagegen Skill executes generation/editing of the planned deliverables.
+Preserve explicit user source choices, suitable supplied/adopted assets and rights. For each independently usable artwork component or set that must match as a unit, search the self-hosted resource library first, then suitable Web sources, then authorized AI generation for the required asset type. Judge candidates against the selected appearance, required states and runtime compatibility, and stop once a suitable source is found. [Resource selection](../../references/resource-selection.md) covers candidate matching and acquisition evidence; audio follows its existing production choice there. For selected AI image production, the system imagegen Skill executes generation/editing of the planned deliverables.
 
 Acquire and inspect the selected files, preserving required appearance and behavior. Reuse the acquisition tools’ saved file facts and known sources, and hand off only adopted runtime files. An unmet art requirement remains a dependency.
 

@@ -25,7 +25,7 @@ Separate input acknowledgment, action execution, contact and consequence where m
 
 Choose a primary cue and any reinforcement for their information and sensation, timing them against the same confirmed event and subject. Strong/weak events differ for a reason. Use the relevant construction method: [art realization](../game-art-director-expert/SKILL.md#realize-the-expression) for effects, [audio](../game-audio-designer/SKILL.md#choose-and-produce-the-audible-roles) for audible cues, or [UI](../game-ui-ux-designer/SKILL.md#make-actions-tangible-and-truthful) for interface feedback. Reuse settled choices and guidance already loaded; [sheet production](../../references/spritesheet-production.md) prepares sheet-based feedback. Preserve targets, aim and essential HUD information.
 
-Shake, hit stop, slow motion and haptics are optional. Distinguish presentation pauses from changes to gameplay time, input or audio; do not assume device capabilities or change physics as cosmetic tuning. For overlapping or interrupted events, decide which information takes priority and use the existing channel lifecycle. Retain essential feedback when a channel is reduced/unavailable without adding a general effects scheduler.
+Where the event feedback is undecided, consider shake, hit stop, slow motion or haptics. Distinguish presentation pauses from changes to gameplay time, input or audio; do not assume device capabilities or change physics as cosmetic tuning. For overlapping or interrupted events, decide which information takes priority and use the existing channel lifecycle. Retain essential feedback when a channel is reduced/unavailable without adding a general effects scheduler.
 
 ## Tune within scope
 

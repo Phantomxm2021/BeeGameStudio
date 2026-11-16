@@ -1,6 +1,6 @@
 ---
 name: phaser4-gamedev
-description: "Select Phaser 4 for a new Web 2D project only when no user-specified or existing engine governs it; implement or debug Phaser 4 APIs for scenes, physics, input, textures, animation and UI in a selected Phaser 4 runtime or a requested migration. Phaser 3 uses its matching APIs and documentation, not these Phaser 4 examples. Playable layout, control response, interface transitions and visual expression use their task methods."
+description: "Default new Web 2D games, including React-hosted games, to Phaser 4 unless another runtime is specified; implement or debug Phaser 4 APIs for scenes, physics, input, textures, animation and UI in a selected Phaser 4 runtime or a requested migration. Phaser 3 uses its matching APIs and documentation, not these Phaser 4 examples. Playable layout, control response, interface transitions and visual expression use their task methods."
 ---
 
 # Phaser 4 Game Development
@@ -12,9 +12,7 @@ using matching official documentation when these leave behavior unclear. Phaser 
 implementation and matching documentation; these Phaser 4 examples are not its
 API reference. For a new version choice or compatibility mismatch, use
 [runtime dependency selection](../../references/runtime-dependencies.md).
-For a new Web 2D project with no user-specified or existing engine, the default
-is Phaser 4; choose its specific 4.x release for the project's compatibility.
-This default does not authorize migrating an existing Phaser 3 project.
+Choose the 4.x release for project compatibility. Retain an existing runtime unless a migration is requested.
 
 Keep the existing project's structure and settled gameplay/art decisions.
 For relationships being built or changed, read the corresponding method:

@@ -1,6 +1,6 @@
 ---
 name: threejs-gamedev
-description: "Select Three.js for a new Web 3D project only when no user-specified or existing engine governs it; implement or debug Three.js scene/render APIs, animation, picking, loading and performance in a selected Three.js runtime, including React Three Fiber and glTF format/loading work. Playable layout, visual expression, control response and interface transitions use their task methods."
+description: "Default new Web 3D games, including React-hosted games, to Three.js unless another runtime is specified; implement or debug Three.js scene/render APIs, animation, picking, loading and performance in a selected Three.js runtime, including React Three Fiber and glTF format/loading work. Playable layout, visual expression, control response and interface transitions use their task methods."
 ---
 
 # Three.js Game Development

@@ -1,8 +1,8 @@
 # Resolve runtime dependencies for this project
 
 Honor the user's explicit engine choice; retain an existing project's engine
-unless a switch is requested. Only a new project with neither a user-specified
-nor an existing engine defaults to Phaser 4 for Web 2D or Three.js for Web 3D.
+unless a switch is requested. For a new Web game, React specifies the host framework. Unless the user
+chooses another runtime, use Phaser 4 for 2D or Three.js for 3D.
 Other engines use their corresponding APIs and documentation; non-Web targets
 use the corresponding engine/SDK rather than inherit these Web defaults.
 The Phaser 4 default leaves the specific 4.x release to compatibility selection;

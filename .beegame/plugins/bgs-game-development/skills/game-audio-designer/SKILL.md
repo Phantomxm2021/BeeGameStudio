@@ -5,7 +5,7 @@ description: "Choose, compose, edit or implement game music, sound assets and au
 
 # Game Audio Designer
 
-Shape the audible experience through play, including the space between events. Choose what carries identity/rhythm, gives the place presence and communicates consequences. Music, ambience, event cues and deliberate silence can serve those roles. Quiet need not mean event-only: sparse phrases or a restrained texture can carry a world. Choose by intended experience, not game size or a default package; no role is mandatory when it adds nothing. Document-only work records intent; repairs stay local.
+Shape the audible experience through play, including the space between events. Keep the sound roles established for identity, rhythm, place and consequences. Music, ambience, event cues and deliberate silence can serve those roles. Quiet need not mean event-only: sparse phrases or a restrained texture can carry a world. Where the design leaves a role open, choose or omit it according to the intended experience. Document-only work records intent; repairs stay local.
 
 ## Choose and produce the audible roles
 
