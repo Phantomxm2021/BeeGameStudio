@@ -9,9 +9,9 @@ Derive usable resources and their production path from the required appearance, 
 
 ## Choose deliverables before requests
 
-Translate independent motion, lighting, occlusion and responsive placement into addressable parts, regions or masks, preserving contact/depth and the exposed area behind moving parts. Background placement does not make a part static. Static parts sharing the same treatment can remain one image; live text/state stay with their runtime consumer. Retain these relationships in existing resource/scene sources.
+Derive the artwork to request from the visible differences established by the GDD and selected visuals, where available. For states that share a form and differ only in how it is shown or driven, request that form once and describe the different playback in the handoff. Request another pose, surface or silhouette only for a specific designed difference that transforming, deforming or shading the shared artwork cannot express.
 
-Derive required image elements, state variants and visible changes before writing prompts or per-object output paths. Group content by shared appearance, scale and element/state relationships. A content family does not prescribe a single generation request or runtime file: generation groups follow actual output capabilities, while runtime packing follows consumer format, sampling, texture-size and loading/release needs. Runtime objects can share named regions instead of requiring a file per object.
+Keep parts or regions separately controllable if either can change while the other holds, including when their cues start together but end at different times. They can share a file while retaining that control. Bake together only what stays together through motion, lighting, occlusion and layout. Preserve contact, depth and the area revealed behind moving parts. Group production requests by shared appearance, scale and what the source can deliver. Pack the results according to the consumer's sampling, size and loading needs.
 
 ## Acquire and deliver usable files
 

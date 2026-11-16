@@ -17,9 +17,9 @@ Menus and results show what matters in that situation instead of repeating facts
 
 ## Choose the interface representation
 
-Derive the required shapes, proportions, material detail and visible state changes at gameplay size from the adopted design. Preserve explicit source choices and suitable existing assets. Obtain required interface artwork through [resource production's source order](../game-content-pipeline-engineer/SKILL.md#acquire-and-deliver-usable-files); layout, live text, hit areas and playback remain runtime implementation.
+Identify what the player is acting on or reading. An object the player manipulates as part of play keeps its gameplay role even when a control handles its input. A readout or command presented to the player serves an interface role, including when it is attached to that same object.
 
-Where specific authored forms or surface detail are needed, define the required artwork and any fixed, stretchable or independently changing regions its consumer needs, in a target-engine-supported representation. These consumer needs determine the art inputs while keeping responsive layout and control behavior in the interface implementation.
+For the interface, carry the adopted shapes, proportions, materials and visible control states into the artwork at play size. Reuse suitable assets and follow [resource production's source order](../game-content-pipeline-engineer/SKILL.md#acquire-and-deliver-usable-files) for missing artwork. Keep regions independent where they need to stretch or change separately. The runtime handles layout, live text, hit areas and playback.
 
 ## Make actions tangible and truthful
 
