@@ -1,6 +1,6 @@
 ---
 name: game-design-check
-description: Review saved design for requirement omissions, source-backed rule contradictions or incomplete player flows within the assigned scope. 中文：受托设计审查，核对需求保留、规则相容与玩家流程闭合。
+description: Review saved design for requirement omissions, source-backed rule contradictions or incomplete player flows within the assigned scope.
 ---
 
 # Game Design Check
@@ -13,7 +13,7 @@ Review the saved design against the confirmed requirements and current assignmen
 - **Rule compatibility:** Do source clauses governing the same situation permit incompatible actions, states or outcomes? Read their conditions, exceptions and numerical meanings together before concluding that they conflict.
 - **Player-flow closure:** Can the player enter play, perform the required action, receive its outcome and reach the applicable continuation, recovery or ending? Report a missing design decision only when the required flow cannot be determined from the saved sources.
 
-For a concrete uncertainty, use the relevant [targeted design questions](../../references/game-design-check/document-checks.md). Read related clauses together and reuse guidance already in context.
+For a concrete uncertainty, use the relevant [targeted design questions](../../references/document-checks.md). Read related clauses together and reuse guidance already in context.
 
 ## Findings and repair
 

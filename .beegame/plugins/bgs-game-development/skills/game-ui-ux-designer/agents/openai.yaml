@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game UI and Interaction"
+  short_description: "Build game UI hierarchy, controls, focus and transitions."
+  default_prompt: "Use $bgs-game-development:game-ui-ux-designer to design or implement the required UI, input and state transitions for the current game and selected art direction."

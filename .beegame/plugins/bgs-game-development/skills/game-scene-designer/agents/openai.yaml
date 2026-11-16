@@ -1,3 +1,4 @@
 interface:
-  display_name: "可玩场景与空间设计"
-  short_description: "组织可玩场景的布局、尺度、层次、视线、动线与遭遇节奏。"
+  display_name: "Playable Scene and Space Design"
+  short_description: "Shape playable layouts, scale, sightlines and encounter pacing."
+  default_prompt: "Use $bgs-game-development:game-scene-designer to resolve playable scene and spatial organization using the current rules and selected design."

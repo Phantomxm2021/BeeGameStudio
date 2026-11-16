@@ -1,0 +1,4 @@
+interface:
+  display_name: "Three.js Game Development"
+  short_description: "Build Three.js scenes, rendering, input, assets and animation."
+  default_prompt: "Use $bgs-game-development:threejs-gamedev to implement or debug the specified scene or rendering feature using the selected Three.js runtime setup."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Audio Design"
+  short_description: "Design music, ambience and event sounds with coherent playback."
+  default_prompt: "Use $bgs-game-development:game-audio-designer to address production, arrangement, mixing or playback using the current game audio goals."

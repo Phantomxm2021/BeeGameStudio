@@ -1,6 +1,6 @@
 ---
 name: game-scene-designer
-description: "Design playable scenes and spatial organization from existing game rules: activity areas, routes, spatial hierarchy, encounters and teaching. Use for initial layouts or spatial revisions, including fixed arenas. 中文：可玩场景与空间设计，含场地组织、动线、空间层次、遭遇与教学；适用首次布局或空间修订，含固定场地。"
+description: "Design playable scenes and spatial organization from existing game rules: activity areas, routes, spatial hierarchy, encounters and teaching. Use for initial layouts or spatial revisions, including fixed arenas."
 ---
 
 # Playable Scene and Spatial Design
@@ -18,6 +18,6 @@ Resolve the action's needed visibility and the interface's actual visual/input o
 
 Calculate only an unresolved reachability/rule question that changes the spatial choice; retain its assumptions and result. Distinguish geometric distance, traversable distance and playtime assumptions. Observe affected scenes/encounters in the actual game when runtime verification is in scope; label unavailable observations and untested game feel.
 
-For first-time teaching or the development of an encounter/round, as well as a reported misunderstanding or pacing problem, use [player guidance and progression](../../references/game-scene-designer/player-guidance-and-progression.md) to choose what the arrangement reveals, lets the player try and changes next.
+For first-time teaching or the development of an encounter/round, as well as a reported misunderstanding or pacing problem, use [player guidance and progression](../../references/player-guidance-and-progression.md) to choose what the arrangement reveals, lets the player try and changes next.
 
-For an unresolved arrangement choice, use only the relevant [worked example](../../references/game-scene-designer/encounter-design-patterns.md): the [playable scene](../../references/game-scene-designer/encounter-design-patterns.md#worked-scene-study-an-existing-platformer) traces visibility, contact and scale into scene sources; the [two-room route](../../references/game-scene-designer/encounter-design-patterns.md#worked-route-reasoning-two-rooms-and-a-return) compares topology, information order and return travel. Reuse retained guidance; these are reasoning examples, not level templates.
+For an unresolved arrangement choice, use only the relevant [worked example](../../references/encounter-design-patterns.md): the [playable scene](../../references/encounter-design-patterns.md#worked-scene-study-an-existing-platformer) traces visibility, contact and scale into scene sources; the [two-room route](../../references/encounter-design-patterns.md#worked-route-reasoning-two-rooms-and-a-return) compares topology, information order and return travel. Reuse retained guidance; these are reasoning examples, not level templates.

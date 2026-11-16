@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Systems Design"
+  short_description: "Design game rules, state loops, numerical tuning and balance."
+  default_prompt: "Use $bgs-game-development:game-systems-designer-expert to resolve the specified game rules, state loops or numerical relationships."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Phaser 4 Game Development"
+  short_description: "Build and debug Phaser 4 scenes, physics, input and assets."
+  default_prompt: "Use $bgs-game-development:phaser4-gamedev to implement or debug the specified engine feature using the Phaser 4 version in the current project."

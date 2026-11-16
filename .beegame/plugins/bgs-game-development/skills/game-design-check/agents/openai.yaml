@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Design Review"
+  short_description: "Find missing requirements, rule conflicts and player flow gaps."
+  default_prompt: "Use $bgs-game-development:game-design-check to review the specified design and report source-backed issues and their player impact."

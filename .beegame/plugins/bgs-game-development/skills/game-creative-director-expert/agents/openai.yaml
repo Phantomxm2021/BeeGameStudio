@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Creative Direction"
+  short_description: "Resolve open experience choices, core play and initial scope."
+  default_prompt: "Use $bgs-game-development:game-creative-director-expert to resolve open game experience or scope questions while preserving confirmed decisions."

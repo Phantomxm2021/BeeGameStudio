@@ -1,6 +1,6 @@
 ---
 name: game-systems-designer-expert
-description: "Design gameplay rules, state transitions and core loops; resolve numerical relationships or diagnosed balance problems using their actual rules and evidence. Progression and economy methods apply when those systems are involved. 中文：玩法系统与状态规则设计、数值关系分析及具体平衡调优。"
+description: "Design gameplay rules, state transitions and core loops; resolve numerical relationships or diagnosed balance problems using their actual rules and evidence. Progression and economy methods apply when those systems are involved."
 ---
 
 # Game Systems Designer
@@ -13,9 +13,9 @@ For an unfamiliar mechanic or consequential unresolved assumption, reuse researc
 
 ## Detail for the current question
 
-- [Core loops](../../references/game-systems-designer-expert/core-loop-contract.md): actions, consequences and the player promise.
-- [State boundaries](../../references/game-systems-designer-expert/state-machine-rules-boundary.md): transitions, simultaneous outcomes and recovery.
-- [Parameter analysis and tuning](../../references/game-systems-designer-expert/parameter-boundary-model.md): units, evidence types, legal calculations and targeted tuning; [growth curves](../../references/game-systems-designer-expert/scaling-curve-models.md) or [economy](../../references/game-systems-designer-expert/economy-balancing-spec.md) only for those quantitative questions.
-- [Experience questions](../../references/game-systems-designer-expert/experience-questions.md): assigned critique or an agency/repetition problem, not a GDD checklist.
+- [Core loops](../../references/core-loop-contract.md): actions, consequences and the player promise.
+- [State boundaries](../../references/state-machine-rules-boundary.md): transitions, simultaneous outcomes and recovery.
+- [Parameter analysis and tuning](../../references/parameter-boundary-model.md): units, evidence types, legal calculations and targeted tuning; [growth curves](../../references/scaling-curve-models.md) or [economy](../../references/economy-balancing-spec.md) only for those quantitative questions.
+- [Experience questions](../../references/experience-questions.md): assigned critique or an agency/repetition problem, not a GDD checklist.
 
 When implementing or tuning, distinguish numerical causes from control, information or level defects, and observe the smallest interaction that could contradict the affected rule. Preserve valid results when their substantive inputs have not changed.

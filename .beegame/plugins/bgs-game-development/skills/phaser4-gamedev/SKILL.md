@@ -1,6 +1,6 @@
 ---
 name: phaser4-gamedev
-description: "Select Phaser 4 for a new Web 2D project only when no user-specified or existing engine governs it; implement or debug Phaser 4 APIs for scenes, physics, input, textures, animation and UI in a selected Phaser 4 runtime or a requested migration. Phaser 3 uses its matching APIs and documentation, not these Phaser 4 examples. Playable layout, control response, interface transitions and visual expression use their task methods. 中文：无用户指定或已有引擎约束的新建 Web 2D 默认选 Phaser 4；API 参考限 Phaser 4，Phaser 3 使用对应版本资料。"
+description: "Select Phaser 4 for a new Web 2D project only when no user-specified or existing engine governs it; implement or debug Phaser 4 APIs for scenes, physics, input, textures, animation and UI in a selected Phaser 4 runtime or a requested migration. Phaser 3 uses its matching APIs and documentation, not these Phaser 4 examples. Playable layout, control response, interface transitions and visual expression use their task methods."
 ---
 
 # Phaser 4 Game Development
@@ -31,14 +31,14 @@ complete GDD; API-only questions use the technical references below.
 
 | Problem | Reference |
 |---|---|
-| Scene restart, pause, input routing, listener ownership | [Scenes and input](../../references/phaser4-gamedev/scenes-and-input.md) |
-| React mount/destroy, state subscription or Canvas/DOM HUD alignment | [React host integration](../../references/phaser4-gamedev/react-host-integration.md) |
-| Arcade/Matter choice, collision, pooled bodies, Tiled maps | [Physics and tilemaps](../../references/phaser4-gamedev/physics-and-tilemaps.md) |
-| Atlas loading, frame alignment, character animation being overwritten | [Textures and animation](../../references/phaser4-gamedev/textures-and-animation.md) |
-| Canvas/HUD sizing, DOM overlay alignment, hit areas | [UI and viewport](../../references/phaser4-gamedev/ui-and-viewport.md) |
-| Filters, masks, shaders, v3 migration, rendering cost | [Renderer and version changes](../../references/phaser4-gamedev/renderer-and-version.md) |
-| Audio unlock, scene music ownership, saved-state reconstruction | [Audio and persistence](../../references/phaser4-gamedev/audio-and-persistence.md) |
-| Vite asset paths, loader failures, production-only runtime errors | [Loading and build diagnosis](../../references/phaser4-gamedev/loading-and-build.md) |
+| Scene restart, pause, input routing, listener ownership | [Scenes and input](../../references/scenes-and-input.md) |
+| React mount/destroy, state subscription or Canvas/DOM HUD alignment | [React host integration](../../references/react-host-integration.md) |
+| Arcade/Matter choice, collision, pooled bodies, Tiled maps | [Physics and tilemaps](../../references/physics-and-tilemaps.md) |
+| Atlas loading, frame alignment, character animation being overwritten | [Textures and animation](../../references/textures-and-animation.md) |
+| Canvas/HUD sizing, DOM overlay alignment, hit areas | [UI and viewport](../../references/ui-and-viewport.md) |
+| Filters, masks, shaders, v3 migration, rendering cost | [Renderer and version changes](../../references/renderer-and-version.md) |
+| Audio unlock, scene music ownership, saved-state reconstruction | [Audio and persistence](../../references/audio-and-persistence.md) |
+| Vite asset paths, loader failures, production-only runtime errors | [Loading and build diagnosis](../../references/loading-and-build.md) |
 
 Read only the reference relevant to the current work. Its examples are starting
 points to adapt to the installed version and the existing code. Choose validation
