@@ -1,3 +1,0 @@
-name = "bgs_implementation"
-description = "Implement and verify the game using the delivered assets."
-developer_instructions = "Implement the approved design using the delivered runtime files and the selected engine. Verify the playable result. Report any missing assets to the lead and return the implementation and verification results."

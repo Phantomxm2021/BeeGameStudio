@@ -1,4 +1,0 @@
-interface:
-  display_name: "Game Art Direction"
-  short_description: "Shape scene, character, material, lighting and effect language."
-  default_prompt: "Use $bgs-game-development:game-art-director-expert to build on the selected design to resolve the required scene or subject appearance."

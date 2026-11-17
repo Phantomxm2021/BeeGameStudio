@@ -1,4 +1,0 @@
-interface:
-  display_name: "Game Controls and Feel"
-  short_description: "Design input mapping, control response and event feedback."
-  default_prompt: "Use $bgs-game-development:game-feel-designer to resolve control response and event feedback using the current gameplay, camera and input devices."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Game Asset Production"
-  short_description: "Select and prepare assets for visual and audio goals."
-  default_prompt: "Use $bgs-game-development:game-content-pipeline-engineer to select production sources and prepare usable assets for the confirmed visual and audio goals."

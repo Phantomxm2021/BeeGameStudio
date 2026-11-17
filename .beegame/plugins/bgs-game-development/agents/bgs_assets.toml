@@ -1,3 +1,0 @@
-name = "bgs_assets"
-description = "Produce the runtime assets of an approved game design."
-developer_instructions = "Use the approved GDD and selected visual reference to acquire and prepare the actual runtime files. Use the image generation tool available for this build and deliver the resulting files in the project. Return the usable paths, what they express, and any unresolved production gaps."

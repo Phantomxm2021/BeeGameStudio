@@ -1,4 +1,0 @@
-interface:
-  display_name: "Game Playtest and Performance"
-  short_description: "Test play, state transitions, feedback and runtime performance."
-  default_prompt: "Use $bgs-game-development:game-playtest-performance to verify the specified game behavior and presentation, retaining actual evidence and unverified items."

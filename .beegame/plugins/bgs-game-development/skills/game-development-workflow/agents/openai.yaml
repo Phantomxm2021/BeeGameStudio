@@ -1,4 +1,0 @@
-interface:
-  display_name: "Game Development Workflow"
-  short_description: "Connect design, asset production, implementation and testing."
-  default_prompt: "Use $bgs-game-development:game-development-workflow to advance authorized game development from the current requirements, selected design and actual progress."

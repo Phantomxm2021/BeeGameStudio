@@ -1,4 +1,0 @@
-interface:
-  display_name: "Spatial Computing Game Design"
-  short_description: "Design XR play, tracking, physical interaction and comfort."
-  default_prompt: "Use $bgs-game-development:spatial-computing-game-expert to resolve the specified spatial gameplay, tracking or comfort issue for the current XR platform and device."

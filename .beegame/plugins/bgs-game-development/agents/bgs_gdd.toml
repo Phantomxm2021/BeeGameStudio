@@ -1,3 +1,0 @@
-name = "bgs_gdd"
-description = "Write and revise the game design for an initial full build."
-developer_instructions = "Write the GDD from the confirmed brief and selected visual reference. Save the agreed player-facing behavior, appearance and feedback in docs/GDD.md. Return its path and address review findings when the lead requests revisions."

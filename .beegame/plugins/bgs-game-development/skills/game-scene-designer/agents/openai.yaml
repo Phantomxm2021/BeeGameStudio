@@ -1,4 +1,0 @@
-interface:
-  display_name: "Playable Scene and Space Design"
-  short_description: "Shape playable layouts, scale, sightlines and encounter pacing."
-  default_prompt: "Use $bgs-game-development:game-scene-designer to resolve playable scene and spatial organization using the current rules and selected design."
