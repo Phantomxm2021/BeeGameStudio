@@ -9,7 +9,7 @@ Derive usable resources and their production path from the required appearance, 
 
 ## Choose deliverables before requests
 
-Derive the artwork to request from the visible differences established by the GDD and selected visuals, where available. Choose the representation that preserves the intended appearance through the change at play size. A value can select painted states in a sheet or drive a mask over shared artwork. Reuse suitable artwork and request the poses, surfaces or intermediate shapes the chosen playback needs.
+Derive the artwork to request from the visible differences established by the GDD and selected visuals, where available. Choose the representation that preserves the intended appearance through the change at play size. A value can select painted states in a sheet or drive a mask over shared artwork. For [sheets and atlases](../../references/spritesheet-production.md#relate-the-sheet-to-its-consumers), distinguish selectable states from changes that need a playback sequence. Reuse suitable artwork and request the poses, surfaces or intermediate shapes the chosen playback needs.
 
 Keep parts or regions separately controllable if either can change while the other holds, including when their cues start together but end at different times. They can share a file while retaining that control. Bake together only what stays together through motion, lighting, occlusion and layout. Preserve contact, depth and the area revealed behind moving parts. Group production requests by shared appearance, scale and what the source can deliver. Pack the results according to the consumer's sampling, size and loading needs.
 
@@ -24,7 +24,6 @@ Use [production/integration](../../references/production-integration.md) for imp
 ## Detail for the current resource
 
 - [Artwork production](../../references/artwork-production.md): image composition, visual matching and prepared parts at runtime size.
-- [Spritesheets/atlases](../../references/spritesheet-production.md): static entries or temporal sequences, layout and measured preparation for any subject, including the optional standalone PNG helper. Specialist character/VFX details are linked there only when applicable.
 - [3D production](../../references/3d-production.md): new model generation or downloaded-model preparation, with optional provider notes/static-prop scripts. Existing usable meshes need no generation/bake-down.
 - [Mesh/material production](../../references/mesh-material-production.md): actual geometry, UV or texture work.
 - [Skeletal handoff](../../references/skeletal-animation-handoff.md): compatible rigs/clips or locomotion-transition problems.
