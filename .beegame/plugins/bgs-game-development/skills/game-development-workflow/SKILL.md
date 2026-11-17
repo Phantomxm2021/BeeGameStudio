@@ -5,7 +5,7 @@ description: "Coordinate a new game or cross-discipline game delivery from confi
 
 # Game Development Workflow
 
-Work within the current assignment, using its brief, selected pictures, configuration, existing design and actual progress. Start at the first unresolved dependency below, rather than repeat completed work. Design-only, resource-only and repair assignments keep their own stopping points; required design review and handoffs remain with the existing task. For an initial full build, the lead delegates the GDD to `bgs_gdd`, submits its saved version to the existing design review, and sends findings back to that author. After approval, delegate the reviewed GDD and selected reference to `bgs_assets`. When the actual files are ready, delegate implementation and play verification to `bgs_implementation`. The lead handles review and delivery in the same Chat and resumes from existing results.
+Start at the first unresolved dependency in the current assignment, using its brief, selected visuals, configuration and saved work. Design-only, resource-only and repair assignments keep their own scope and stopping points. For a full build, the lead delegates the GDD to `bgs_gdd`, submits it for independent design review and returns findings to that author. After approval, `bgs_assets` produces the runtime files. `bgs_implementation` builds and playtests with those files. A wait timeout leaves the assignment with its author. Intervene when a specific failed or blocked operation prevents progress. The lead submits the delivered files and reuses that author’s observations for the same build and conditions. Ask the author about a required result only when its evidence is missing, contradictory or stale.
 
 ## Resolve dependencies before expanding work
 
