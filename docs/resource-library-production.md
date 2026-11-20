@@ -66,6 +66,28 @@ assets.
 
 ## Acceptance checks
 
+### Resident MCP verification (2026-11-21)
+
+The resident service passed verification in an ordinary account's dedicated
+project. Two independent native BGS sessions discovered all six tools through
+the platform registration, with four read-only catalog tools and two project
+tools.
+
+- **Direct import passed.** A search for `wheelchair move forward` selected
+  `GLB/character-female-a.glb` from Mini Characters. The search result
+  provided `packId`, `elementId`, and `revision` for `import_asset`. The model
+  and original `Textures/colormap.png` matched the source archive's SHA-256
+  hashes.
+- **Cross-session reuse passed.** The second session called
+  `inspect_project_asset` with only the project-relative model path. Both
+  files passed verification of source, revision, and SHA-256. No new
+  download grants or downloads were needed.
+
+The protocol test made zero model calls. All 25 published releases matched
+the retained baseline, and the five resident service processes stayed up.
+The temporary account and project were removed.
+[Verification receipt](verification/beegamestudio-assets-mcp-six-tool-resident-20261121.json)
+
 1. Use an authorized account and a published Pack. For discovery/download checks,
    use existing library data and an isolated temporary output directory; do not
    create a game project or start generation/semantic processing.
