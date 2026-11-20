@@ -1,0 +1,140 @@
+{
+  "status": "passed",
+  "startedAt": "2026-11-20T16:52:11.224Z",
+  "modelCalls": 0,
+  "method": "Native BGS app-server protocol, live project ownership, platform MCP registry, hosted catalog and resident resolution",
+  "sessions": [
+    {
+      "threadId": "01a1f9df-81d8-7650-8545-aef3ab985b43",
+      "tools": {
+        "beegamestudio-assets": [
+          "browse_assets",
+          "get_asset",
+          "get_pack",
+          "search_assets"
+        ],
+        "beegamestudio-project-assets": [
+          "import_asset",
+          "inspect_project_asset"
+        ]
+      }
+    },
+    {
+      "threadId": "01a1f9df-9a50-75e1-9d9c-a3aea8aa55ca",
+      "tools": {
+        "beegamestudio-assets": [
+          "browse_assets",
+          "get_asset",
+          "get_pack",
+          "search_assets"
+        ],
+        "beegamestudio-project-assets": [
+          "import_asset",
+          "inspect_project_asset"
+        ]
+      }
+    }
+  ],
+  "toolCalls": [
+    {
+      "session": 1,
+      "server": "beegamestudio-assets",
+      "tool": "search_assets"
+    },
+    {
+      "session": 1,
+      "server": "beegamestudio-project-assets",
+      "tool": "import_asset"
+    },
+    {
+      "session": 2,
+      "server": "beegamestudio-project-assets",
+      "tool": "inspect_project_asset"
+    }
+  ],
+  "resolutions": [
+    {
+      "origin": "http://127.0.0.1:62177",
+      "path": "/internal/project-resources/api/resource-library/resolve",
+      "status": 200,
+      "signedObjects": 2
+    }
+  ],
+  "cleanup": {
+    "project": {
+      "deleteHttp": 200,
+      "readback": 404,
+      "workspaceRemoved": true
+    },
+    "logout": 204,
+    "identity": {
+      "deleteHttp": 200,
+      "readback": 404
+    }
+  },
+  "ordinary": {
+    "role": "developer",
+    "resourceManagementHttp": 403
+  },
+  "search": {
+    "query": "wheelchair move forward",
+    "action": "wheelchair-move-forward",
+    "pack": "kenney_mini-characters",
+    "elementPath": "GLB/character-female-a.glb",
+    "matches": 12,
+    "revision": "f0fce00e2a12d24581a416be2b2405fc48b28504a36063af67e7131ae9d8d8c8"
+  },
+  "import": {
+    "originalArchiveHash": "a95a02b556735246570549d0c4a1fcd13ea46ede18187c63d463575a56fd6e1d",
+    "referencePath": "Textures/colormap.png",
+    "files": [
+      {
+        "path": "public/assets/mcp-acceptance/actor.glb",
+        "sha256": "8cfcff43460da8b421f2a7fdfb43ec177321cad2746db9497cbf128d5806e2a8"
+      },
+      {
+        "path": "public/assets/mcp-acceptance/Textures/colormap.png",
+        "sha256": "0d4947d34ff32acf4a359c7f22ca784e057e7e72f622170a9a77b6fc88fdb70e"
+      }
+    ]
+  },
+  "reuse": {
+    "path": "public/assets/mcp-acceptance/actor.glb",
+    "verified": true,
+    "files": 2,
+    "provenanceAndHashesMatch": true,
+    "catalogOrSigningAuthRequests": 0,
+    "signedObjects": 0
+  },
+  "postflight": {
+    "publishedPacks": 25,
+    "publishedMetadataRevisionsManifestsAndObjectMapsMatchRetainedBaseline": true,
+    "verifiedReadbacks": 2,
+    "publishedAuditEventsDuringAcceptance": 0,
+    "auditEventsOnUnpublishedPacksDuringAcceptance": 15,
+    "unpublishedAuditActions": [
+      "element.uploaded"
+    ],
+    "allPackSnapshotChanged": true,
+    "differencesFromRetainedBaseline": [
+      {
+        "pack": "cozy_ui_pack",
+        "state": "added",
+        "status": "draft"
+      },
+      {
+        "pack": "game_icon_pack_v1.4",
+        "state": "added",
+        "status": "draft"
+      },
+      {
+        "pack": "sprout_lands_ui_pack_basic pack",
+        "state": "added",
+        "status": "draft"
+      }
+    ],
+    "retainedBaselinePublicationFingerprint": "4c1af15582a0b645c845d29296a1056b56e37eb6267155b4bed9cc53f1c7cec6",
+    "fiveResidentListenerPidsMatchThisTurnPreflight": true
+  },
+  "finishedAt": "2026-11-20T16:52:29.724Z"
+}
